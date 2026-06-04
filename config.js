@@ -65,6 +65,18 @@ module.exports = {
   zilean: {
     url: process.env.ZILEAN_URL || '',
   },
+  // 0.30.0: Newsnab-compatible NZB indexer (NZBgeek, NZBfinder, omgwtfnzbs,
+  // drunkenslug, or any Newznab/Torznab v2 endpoint). Used to search Usenet
+  // for the catalog's sports content. The base URL is the indexer's API root
+  // (e.g. https://api.nzbgeek.info), api key is the per-account key from the
+  // indexer dashboard. Categories default to TV-Sport (5080) + TV-Other
+  // (5000) + Other (8000) — broad enough to catch most sports posts.
+  newsnab: {
+    url: process.env.NEWSNAB_URL || '',
+    apiKey: process.env.NEWSNAB_API_KEY || '',
+    categories: (process.env.NEWSNAB_CATEGORIES || '5000,5080,8000')
+      .split(',').map((s) => s.trim()).filter(Boolean),
+  },
   // Debrid providers — any combination of these can be configured.
   // streams.js queries each configured provider in series for every Prowlarr
   // candidate and returns one stream per provider per cache hit.
