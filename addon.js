@@ -287,10 +287,13 @@ function createApp() {
     const maxStreams = (Number.isFinite(maxStreamsRaw) && maxStreamsRaw >= 0 && maxStreamsRaw <= 20) ? maxStreamsRaw : 0;
     try {
       users.updateUserConfig(req.user.id, {
-        // 0.30.0: uuManifestUrl is the new primary field. Debrid keys still
-        // saved for backward compat; they're ignored by the Usenet /stream
-        // handler and will be removed in a follow-up cleanup pass.
+        // 0.30.0–0.31.0: two Usenet backend fields. Either (or both) populates
+        // the /stream response. uuManifestUrl points at a self-hosted/Elfhosted
+        // Usenet Ultimate instance; torboxApiKey targets TorBox's hosted CDN.
+        // Debrid keys preserved for backward compat with old user records and
+        // will be removed in a follow-up cleanup pass.
         uuManifestUrl: String(b.uuManifestUrl || '').trim(),
+        torboxApiKey: String(b.torboxApiKey || '').trim(),
         rd: String(b.rd || '').trim(),
         tb: String(b.tb || '').trim(),
         pm: String(b.pm || '').trim(),
@@ -1504,8 +1507,12 @@ function renderAccountPage(user, opts) {
     +     '</div>'
 
     +     '<div class="tab-panel" data-tab="services">'
+    +       '<h3 class="sec">TorBox Usenet</h3>'
+    +       '<p class="hint">Paste your TorBox API key. Stream rows will search TorBox\'s built-in Usenet indexer and play directly from their CDN — single subscription, no separate provider/mount needed. Get the key from <a href="https://torbox.app/settings" target="_blank" rel="noopener">torbox.app/settings</a> (requires Pro plan).</p>'
+    +       secretField('TorBox API key', 'torboxApiKey', cfg.torboxApiKey, 'paste your TorBox API key')
+
     +       '<h3 class="sec">Usenet Ultimate</h3>'
-    +       '<p class="hint">Paste your Usenet Ultimate addon\'s manifest URL. Stream rows from this addon will play through your UU instance, which downloads via NzbDAV and serves over HTTP. Get it from UU\'s admin page; looks like <code>https://&lt;your-uu&gt;.elfhosted.com/stremio/&lt;config&gt;/manifest.json</code>.</p>'
+    +       '<p class="hint">OR/AND paste a Usenet Ultimate manifest URL. Streams play through your UU instance, which downloads via NzbDAV and serves over HTTP. Use this if you have a self-hosted or Elfhosted UU stack. Looks like <code>https://&lt;your-uu&gt;.elfhosted.com/stremio/&lt;config&gt;/manifest.json</code>.</p>'
     +       '<label class="lbl" for="uu-url">UU manifest URL</label>'
     +       '<input class="inp" type="url" id="uu-url" name="uuManifestUrl" value="'
     +         escapeHtml(cfg.uuManifestUrl || '') + '" placeholder="https://your-usenet-ultimate.elfhosted.com/stremio/&lt;config&gt;/manifest.json">'
