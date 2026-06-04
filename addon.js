@@ -287,6 +287,10 @@ function createApp() {
     const maxStreams = (Number.isFinite(maxStreamsRaw) && maxStreamsRaw >= 0 && maxStreamsRaw <= 20) ? maxStreamsRaw : 0;
     try {
       users.updateUserConfig(req.user.id, {
+        // 0.30.0: uuManifestUrl is the new primary field. Debrid keys still
+        // saved for backward compat; they're ignored by the Usenet /stream
+        // handler and will be removed in a follow-up cleanup pass.
+        uuManifestUrl: String(b.uuManifestUrl || '').trim(),
         rd: String(b.rd || '').trim(),
         tb: String(b.tb || '').trim(),
         pm: String(b.pm || '').trim(),
@@ -533,6 +537,64 @@ function createApp() {
       res.redirect('/admin/power-tool?event=' + encodeURIComponent(eventId) + '&flash=' + encodeURIComponent('Warm error: ' + e.message));
     }
   });
+  // 0.28.2: LIVE Prowlarr/Zilean search. Admin types a free-form query;
+  // we hit the indexers directly and stash the results so the next page
+  // render can show them. No relevance filter, no streamcache write —
+  // results sit in memory per-admin per-event until the commit step.
+  app.post('/admin/power-tool/live-search', requireAdmin, async (req, res) => {
+    const eventId = String(req.body.event || '').trim();
+    const query   = String(req.body.query || '').trim();
+    const sources = [];
+    if (req.body.src_prowlarr) sources.push('prowlarr');
+    if (req.body.src_zilean)   sources.push('zilean');
+    if (req.body.src_extra)    sources.push('extra');
+    if (sources.length === 0) sources.push('prowlarr');
+    if (!eventId || !query) {
+      return res.redirect('/admin/power-tool?event=' + encodeURIComponent(eventId)
+        + '&flash=' + encodeURIComponent('Pick an event and type a search query.'));
+    }
+    try {
+      const r = await powerTool.liveSearch(req.user.id, eventId, query, sources, (m) => console.log(m));
+      const msg = r.ok
+        ? ('Live search returned ' + r.count + ' result(s) for "' + query + '"')
+        : ('Live search failed: ' + r.reason);
+      res.redirect('/admin/power-tool?event=' + encodeURIComponent(eventId)
+        + '&q=' + encodeURIComponent(query)
+        + '&srcs=' + encodeURIComponent(sources.join(','))
+        + '&flash=' + encodeURIComponent(msg));
+    } catch (e) {
+      res.redirect('/admin/power-tool?event=' + encodeURIComponent(eventId)
+        + '&flash=' + encodeURIComponent('Live search error: ' + e.message));
+    }
+  });
+
+  app.post('/admin/power-tool/commit', requireAdmin, async (req, res) => {
+    const eventId = String(req.body.event || '').trim();
+    const provider = String(req.body.provider || 'none').toLowerCase();
+    const hashesRaw = req.body.hashes;
+    const hashes = Array.isArray(hashesRaw) ? hashesRaw : (hashesRaw ? [hashesRaw] : []);
+    if (!eventId || hashes.length === 0) {
+      return res.redirect('/admin/power-tool?event=' + encodeURIComponent(eventId)
+        + '&flash=' + encodeURIComponent('Tick at least one row before committing.'));
+    }
+    try {
+      const r = await powerTool.commitAndWarm(req.user.id, eventId, hashes, provider, (m) => console.log(m));
+      let msg;
+      if (!r.ok) msg = 'Commit failed: ' + r.reason;
+      else {
+        const warmStr = r.warm && r.warm.ok
+          ? (' · warmed ' + r.warm.results.filter((x) => x.ok).length + '/' + r.warm.results.length + ' on ' + provider.toUpperCase())
+          : (provider === 'none' ? ' (no warm)' : ' · warm: ' + ((r.warm && r.warm.reason) || 'failed'));
+        msg = 'Committed ' + r.picks + ' pick(s) (' + r.added + ' new, ' + r.updated + ' updated)' + warmStr;
+      }
+      res.redirect('/admin/power-tool?event=' + encodeURIComponent(eventId)
+        + '&flash=' + encodeURIComponent(msg));
+    } catch (e) {
+      res.redirect('/admin/power-tool?event=' + encodeURIComponent(eventId)
+        + '&flash=' + encodeURIComponent('Commit error: ' + e.message));
+    }
+  });
+
   app.post('/admin/power-tool/reverify', requireAdmin, async (req, res) => {
     const eventId = String(req.body.event || '').trim();
     if (!eventId) return res.redirect('/admin/power-tool?flash=' + encodeURIComponent('No event selected.'));
@@ -1442,23 +1504,25 @@ function renderAccountPage(user, opts) {
     +     '</div>'
 
     +     '<div class="tab-panel" data-tab="services">'
-    +       '<h3 class="sec">Debrid providers</h3>'
-    +       '<p class="hint">Leave a field blank to disable that provider for your account.</p>'
-    +       secretField('Real-Debrid token', 'rd', cfg.rd, 'paste your RD token')
-    +       secretField('TorBox API token', 'tb', cfg.tb, 'paste your TorBox token')
-    +       secretField('Premiumize API key', 'pm', cfg.pm, 'paste your Premiumize key')
+    +       '<h3 class="sec">Usenet Ultimate</h3>'
+    +       '<p class="hint">Paste your Usenet Ultimate addon\'s manifest URL. Stream rows from this addon will play through your UU instance, which downloads via NzbDAV and serves over HTTP. Get it from UU\'s admin page; looks like <code>https://&lt;your-uu&gt;.elfhosted.com/stremio/&lt;config&gt;/manifest.json</code>.</p>'
+    +       '<label class="lbl" for="uu-url">UU manifest URL</label>'
+    +       '<input class="inp" type="url" id="uu-url" name="uuManifestUrl" value="'
+    +         escapeHtml(cfg.uuManifestUrl || '') + '" placeholder="https://your-usenet-ultimate.elfhosted.com/stremio/&lt;config&gt;/manifest.json">'
 
-    +       '<h3 class="sec">Stream resolution</h3>'
-    +       '<p class="hint">Limit how many cached releases to surface per event (each can return one link per debrid service). 0 = unlimited (default). Smaller numbers = faster, fewer options. Sorted by file size, largest first.</p>'
-    +       '<label class="lbl">Max streams (0 = unlimited)</label>'
-    +       '<input class="inp" type="number" name="maxStreams" min="0" max="20" value="'
+    +       '<h3 class="sec">Result count</h3>'
+    +       '<p class="hint">Cap the number of stream rows shown per event. 0 = use server default ('
+    +         escapeHtml(String(parseInt(process.env.STREAM_MAX_ROWS || '20', 10))) + '). Sorted by size (largest first), then by recency.</p>'
+    +       '<label class="lbl">Max streams (0 = default)</label>'
+    +       '<input class="inp" type="number" name="maxStreams" min="0" max="50" value="'
     +         escapeHtml(String(cfg.maxStreams || 0)) + '" style="max-width:120px;">'
 
-    // 0.26.2: user-facing auto-warm checkboxes removed. Repeated /stream
-    // calls on the same hash were causing TB createTorrent 429 storms that
-    // wrongly soft-denylisted already-cached working links. Use the admin
-    // per-event warm tool instead (coming in a future release). Hidden inputs
-    // preserve the saved values so the schema stays intact server-side.
+    // Debrid keys preserved as hidden inputs so existing values aren\'t wiped
+    // on save. The Usenet /stream handler ignores them; cleanup pass will
+    // strip both UI + schema in a follow-up release.
+    +       '<input type="hidden" name="rd" value="' + escapeHtml(cfg.rd || '') + '">'
+    +       '<input type="hidden" name="tb" value="' + escapeHtml(cfg.tb || '') + '">'
+    +       '<input type="hidden" name="pm" value="' + escapeHtml(cfg.pm || '') + '">'
     +       '<input type="hidden" name="autoCacheRD" value="' + (ac.rd ? '1' : '') + '">'
     +       '<input type="hidden" name="autoCacheTB" value="' + (ac.tb ? '1' : '') + '">'
     +       '<input type="hidden" name="autoCachePM" value="' + (ac.pm ? '1' : '') + '">'
