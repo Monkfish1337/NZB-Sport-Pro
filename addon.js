@@ -287,11 +287,12 @@ function createApp() {
     const maxStreams = (Number.isFinite(maxStreamsRaw) && maxStreamsRaw >= 0 && maxStreamsRaw <= 20) ? maxStreamsRaw : 0;
     try {
       users.updateUserConfig(req.user.id, {
-        // 0.31.1: uuManifestUrl is the only active backend field. TorBox
-        // direct integration was retired (see lib/sources/torbox-usenet.js).
-        // Legacy debrid keys preserved for backward compat with old records
-        // and will be removed in a follow-up cleanup pass.
+        // 0.33.0: two active backend fields. uuManifestUrl drives the
+        // Usenet handoff; torboxApiKey drives the TorBox resolution path
+        // (companion scraper returns hashes -> addon checks TorBox cache
+        // with this key -> resolved playable URLs returned).
         uuManifestUrl: String(b.uuManifestUrl || '').trim(),
+        torboxApiKey: String(b.torboxApiKey || '').trim(),
         rd: String(b.rd || '').trim(),
         tb: String(b.tb || '').trim(),
         pm: String(b.pm || '').trim(),
@@ -688,12 +689,20 @@ function createApp() {
   app.post('/admin/sources', requireAdmin, (req, res) => {
     const b = req.body || {};
     try {
+      // 0.33.0: indexer fields kept (Prowlarr/Zilean) for backward compat
+      // with older user installs, even though the metadata addon itself
+      // no longer queries them — scraping moved to the SeriousSportScraper
+      // companion service.
       settings.setSources({
         prowlarrUrl: String(b.prowlarrUrl || ''),
         prowlarrApiKey: String(b.prowlarrApiKey || ''),
         zileanUrl: String(b.zileanUrl || ''),
       });
-      res.redirect('/admin?flash=' + encodeURIComponent('Indexer sources saved.'));
+      settings.setCompanion({
+        url: String(b.companionUrl || ''),
+        authToken: String(b.companionAuthToken || ''),
+      });
+      res.redirect('/admin?flash=' + encodeURIComponent('Sources saved.'));
     } catch (err) {
       res.redirect('/admin?flash=' + encodeURIComponent('Save failed: ' + err.message));
     }
@@ -862,18 +871,26 @@ function renderAdminPage(currentUser, opts) {
     +   '<button class="btn-install" type="submit">Warm stream cache now</button>'
     + '</form>';
 
-  // Indexer sources (effective values: stored override, else env fallback).
+  // 0.33.0: companion-scraper URL is the primary content config. Legacy
+  // Prowlarr/Zilean fields are now informational only (the addon doesn't
+  // call them — scraping moved to the companion service).
+  const _comp = settings.getCompanion();
   const _pw = settings.getProwlarr();
   const _zl = settings.getZilean();
   const sourcesHtml = ''
-    + '<h3 class="sec">Indexer sources</h3>'
-    + '<p class="hint">Point the addon at your own indexers. At least one is needed for stream results (metadata works without). Values saved here override env vars and apply immediately — no restart. Leave blank to disable a source.</p>'
+    + '<h3 class="sec">Companion scraper</h3>'
+    + '<p class="hint">URL of the SeriousSportScraper companion service you have deployed. The metadata addon delegates content discovery to it and resolves the returned hashes through each user\'s own TorBox key. Leave blank to disable the TorBox pipeline.</p>'
     + '<form method="POST" action="/admin/sources">'
-    +   '<label class="lbl">Prowlarr URL</label>'
-    +   '<input class="inp mono" name="prowlarrUrl" value="' + escapeHtml(_pw.url) + '" placeholder="http://prowlarr:9696" autocomplete="off">'
-    +   secretField('Prowlarr API key', 'prowlarrApiKey', _pw.apiKey, 'Prowlarr \u2192 Settings \u2192 General \u2192 API Key')
-    +   '<label class="lbl">Zilean URL</label>'
-    +   '<input class="inp mono" name="zileanUrl" value="' + escapeHtml(_zl.url) + '" placeholder="http://zilean:8181" autocomplete="off">'
+    +   '<label class="lbl">Companion URL</label>'
+    +   '<input class="inp mono" name="companionUrl" value="' + escapeHtml(_comp.url) + '" placeholder="http://scraper:8080" autocomplete="off">'
+    +   secretField('Companion auth token (optional)', 'companionAuthToken', _comp.authToken, 'shared bearer if scraper is internet-exposed')
+    + '<h3 class="sec" style="margin-top:18px;">Legacy indexer sources</h3>'
+    + '<p class="hint">Unused by 0.33.0+ — kept so existing values are preserved across upgrades.</p>'
+    +   '<label class="lbl">Prowlarr URL (legacy)</label>'
+    +   '<input class="inp mono" name="prowlarrUrl" value="' + escapeHtml(_pw.url) + '" placeholder="(legacy, unused by 0.33.0+)" autocomplete="off">'
+    +   secretField('Prowlarr API key (legacy)', 'prowlarrApiKey', _pw.apiKey, 'unused by 0.33.0+')
+    +   '<label class="lbl">Zilean URL (legacy)</label>'
+    +   '<input class="inp mono" name="zileanUrl" value="' + escapeHtml(_zl.url) + '" placeholder="(legacy, unused by 0.33.0+)" autocomplete="off">'
     +   '<button class="btn-install" type="submit">Save sources</button>'
     + '</form>';
 
@@ -1505,8 +1522,12 @@ function renderAccountPage(user, opts) {
     +     '</div>'
 
     +     '<div class="tab-panel" data-tab="services">'
+    +       '<h3 class="sec">TorBox</h3>'
+    +       '<p class="hint">Paste your TorBox API key. Used by the addon to check which scraper results are already cached on your TorBox subscription, and to return playable URLs only for cached items. Your key never leaves this addon.</p>'
+    +       secretField('TorBox API key', 'torboxApiKey', cfg.torboxApiKey, 'paste your TorBox API key')
+
     +       '<h3 class="sec">Usenet Ultimate</h3>'
-    +       '<p class="hint">Paste your Usenet Ultimate addon\'s manifest URL. Stream rows will play through your UU instance, which downloads via NzbDAV and serves over HTTP. Get it from UU\'s admin page; looks like <code>https://&lt;your-uu&gt;.elfhosted.com/stremio/&lt;config&gt;/manifest.json</code>.</p>'
+    +       '<p class="hint">Paste a Usenet Ultimate manifest URL. Stream rows will play through your UU instance. Leave blank if you don\'t use UU.</p>'
     +       '<label class="lbl" for="uu-url">UU manifest URL</label>'
     +       '<input class="inp" type="url" id="uu-url" name="uuManifestUrl" value="'
     +         escapeHtml(cfg.uuManifestUrl || '') + '" placeholder="https://your-usenet-ultimate.elfhosted.com/stremio/&lt;config&gt;/manifest.json">'
