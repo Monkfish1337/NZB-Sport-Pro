@@ -38,10 +38,23 @@ function inScope(ev, promotion) {
 
 function activeSeasons() {
   if (Array.isArray(config.tsdb.seasons) && config.tsdb.seasons.length > 0) return config.tsdb.seasons;
+  // Earliest = max(today - EVENT_WINDOW_DAYS_BACK, EVENT_WINDOW_START_DATE).
+  // 0.31.1: the daysBack window alone misses everything before
+  // (today - daysBack) even when EVENT_WINDOW_START_DATE is older — which
+  // meant the 2025-01-01 floor never actually pulled 2025 seasons. Now
+  // both bounds participate.
   const back = Math.max(0, config.eventWindowDaysBack | 0);
   const ahead = Math.max(0, config.eventWindowDaysAhead | 0);
   const today = new Date();
-  const earliest = new Date(today); earliest.setDate(earliest.getDate() - back);
+  let earliest = new Date(today); earliest.setDate(earliest.getDate() - back);
+  // 0.31.1: same default as lib/promotions.js so the env var being unset
+  // doesn't silently fall back to a daysBack-only window. Both files should
+  // agree on the catalog floor.
+  const windowStart = process.env.EVENT_WINDOW_START_DATE || '2025-01-01';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(windowStart)) {
+    const startDate = new Date(windowStart + 'T00:00:00Z');
+    if (startDate < earliest) earliest = startDate;
+  }
   const latest = new Date(today); latest.setDate(latest.getDate() + ahead);
   const years = new Set();
   for (let y = earliest.getUTCFullYear(); y <= latest.getUTCFullYear(); y++) years.add(String(y));
@@ -200,20 +213,29 @@ async function runRefresh(options) {
       totalAdded += synth;
     }
 
-    // Wikipedia poster/description backfill for events that lack imagery.
-    if (wiki && p.wikipediaTitle && (p.source.type === 'thesportsdb' || p.source.type === 'onefc' || p.source.type === 'wikipedia-list')) {
-      const needsArt = promotionEvents.filter((ev) =>
-        (!ev.hasSourceImage || !ev.hasSourceDescription) && ev.linkTarget
-      );
+    // Wikipedia poster backfill for events that lack imagery.
+    // 0.31.1: removed the hasSourceDescription leg of the OR — descriptions
+    // aren't rendered to clients anymore (see lib/transform.js), so fetching
+    // them was pure waste. Halves Wikipedia traffic at minimum, and skips
+    // the call entirely for image-complete events.
+    // Also gated by WIKIPEDIA_ENRICH env (default on) — set to "off" for
+    // fastest possible refresh when you don't care about per-event posters.
+    const wikiEnrichOn = (process.env.WIKIPEDIA_ENRICH || 'on').toLowerCase() !== 'off';
+    if (wikiEnrichOn && wiki && p.wikipediaTitle && (p.source.type === 'thesportsdb' || p.source.type === 'onefc' || p.source.type === 'wikipedia-list')) {
+      const needsArt = promotionEvents.filter((ev) => !ev.hasSourceImage && ev.linkTarget);
       if (needsArt.length > 0) {
-        log('  ' + p.id + ': backfilling ' + needsArt.length + ' events from Wikipedia');
+        const wikiStart = Date.now();
+        log('  ' + p.id + ': backfilling ' + needsArt.length + ' image-less events from Wikipedia');
         try {
           await wiki.enrichWithSummaries(needsArt, log);
           for (const ev of needsArt) byId.set(ev.id, ev);
         } catch (err) {
           log('  ' + p.id + ' Wikipedia backfill failed: ' + err.message);
         }
+        log('  ' + p.id + ': wiki took ' + ((Date.now() - wikiStart) / 1000).toFixed(1) + 's');
       }
+    } else if (!wikiEnrichOn && p.wikipediaTitle) {
+      log('  ' + p.id + ': Wikipedia enrichment disabled (WIKIPEDIA_ENRICH=off)');
     }
   }
 
