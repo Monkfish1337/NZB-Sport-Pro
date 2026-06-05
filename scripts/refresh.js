@@ -181,6 +181,25 @@ async function runRefresh(options) {
     totalUpdated += updated;
     totalSkipped += skipped;
 
+    // 0.31.1: per-promotion synthesis hook. Lets a promotion add derived
+    // events that aren't in the source's data — e.g. MotoGP Qualifying,
+    // synthesised from Race events because TSDB doesn't catalogue separate
+    // qualifying sessions. Synthesised events are skipped if their id
+    // already exists (real events always win).
+    if (typeof p.expandEvents === 'function') {
+      const extras = p.expandEvents(promotionEvents) || [];
+      let synth = 0;
+      for (const ev of extras) {
+        if (!ev || !ev.id || byId.has(ev.id)) continue;
+        if (!inScope(ev, p)) continue;
+        byId.set(ev.id, ev);
+        promotionEvents.push(ev);
+        synth++;
+      }
+      if (synth) log('  ' + p.id + ': +' + synth + ' synthesised event(s)');
+      totalAdded += synth;
+    }
+
     // Wikipedia poster/description backfill for events that lack imagery.
     if (wiki && p.wikipediaTitle && (p.source.type === 'thesportsdb' || p.source.type === 'onefc' || p.source.type === 'wikipedia-list')) {
       const needsArt = promotionEvents.filter((ev) =>
