@@ -1,7 +1,7 @@
 {
     "name":  "serioussportsync",
-    "version": "0.31.1",
-    "description":  "Self-hosted Stremio addon: multi-user sports metadata + per-user Usenet Ultimate stream integration. Covers UFC, ONE Championship, WWE, AEW, F1, Boxing, MotoGP.",
+    "version": "0.32.0",
+    "description":  "Self-hosted Stremio addon: sports metadata catalog with admin-configured Torznab scraping. Emits standard infoHash stream rows the client renders alongside any other addon. Covers UFC, ONE Championship, WWE, AEW, F1, Boxing, MotoGP.",
     "main":  "server.js",
     "scripts":  {
                     "start":  "node server.js",
