@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="24" fill="#0e1116"/>
+  <rect x="14" y="14" width="100" height="100" rx="18" fill="#4fd1c5"/>
+  <text x="64" y="82" font-family="-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif" font-size="44" font-weight="700" fill="#03201e" text-anchor="middle">SSS</text>
+</svg>

@@ -9,6 +9,7 @@ const store = require('./lib/store');
 const streamcache = require('./lib/streamcache');
 const settings = require('./lib/settings');
 const { runStreamRefresh, readStatus: readWarmerStatus } = require('./scripts/refresh-streams');
+const { runRefresh: runEventsRefresh } = require('./scripts/refresh');
 const promotions = require('./lib/promotions');
 const users = require('./lib/users');
 const sessions = require('./lib/sessions');
@@ -21,6 +22,11 @@ const positiveCache = require('./lib/positive-cache');
 const logBuffer = require('./lib/log-buffer');
 // 0.28.0: per-event admin power tool.
 const powerTool = require('./lib/power-tool');
+// 0.37.0: Tabler-based page chrome (sidebar + topbar + container layout).
+// Used by all post-0.37.0 page renders; the legacy accountPage() wrapper
+// below remains for any unconverted pages and is removed once all renders
+// use tablerChrome.tablerPage().
+const tablerChrome = require('./lib/tabler-chrome');
 const APP_VERSION = require('./package.json').version || '?';
 
 
@@ -176,11 +182,11 @@ function createApp() {
       + '<code>ADMIN_USER</code> env var (currently <code>'
       + escapeHtml(prefill || '(unset)') + '</code>).</p>'
       + '<form method="POST" action="/setup">'
-      + '<label class="lbl">Username</label>'
-      + '<input class="inp" name="username" value="' + escapeHtml(prefill) + '" required minlength="3" maxlength="32" autofocus>'
-      + '<label class="lbl">Password</label>'
-      + '<input class="inp" name="password" type="password" required minlength="8">'
-      + '<button class="btn-install" type="submit">Create admin account</button>'
+      + '<label class="form-label">Username</label>'
+      + '<input class="form-control" name="username" value="' + escapeHtml(prefill) + '" required minlength="3" maxlength="32" autofocus>'
+      + '<label class="form-label">Password</label>'
+      + '<input class="form-control" name="password" type="password" required minlength="8">'
+      + '<button class="btn btn-primary w-100 mt-3" type="submit">Create admin account</button>'
       + '</form>'
     ));
   });
@@ -205,11 +211,11 @@ function createApp() {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(authPage('Sign in',
       '<form method="POST" action="/login">'
-      + '<label class="lbl">Username</label>'
-      + '<input class="inp" name="username" required autofocus>'
-      + '<label class="lbl">Password</label>'
-      + '<input class="inp" name="password" type="password" required>'
-      + '<button class="btn-install" type="submit">Sign in</button>'
+      + '<label class="form-label">Username</label>'
+      + '<input class="form-control" name="username" required autofocus>'
+      + '<label class="form-label">Password</label>'
+      + '<input class="form-control" name="password" type="password" required>'
+      + '<button class="btn btn-primary w-100 mt-3" type="submit">Sign in</button>'
       + '</form>'
     ));
   });
@@ -243,11 +249,11 @@ function createApp() {
       return res.status(401).send(authPage('Sign in',
         '<p style="color:var(--accent);margin:0 0 12px;">Invalid username or password.</p>'
         + '<form method="POST" action="/login">'
-        + '<label class="lbl">Username</label>'
-        + '<input class="inp" name="username" value="' + escapeHtml(username) + '" required>'
-        + '<label class="lbl">Password</label>'
-        + '<input class="inp" name="password" type="password" required autofocus>'
-        + '<button class="btn-install" type="submit">Sign in</button>'
+        + '<label class="form-label">Username</label>'
+        + '<input class="form-control" name="username" value="' + escapeHtml(username) + '" required>'
+        + '<label class="form-label">Password</label>'
+        + '<input class="form-control" name="password" type="password" required autofocus>'
+        + '<button class="btn btn-primary w-100 mt-3" type="submit">Sign in</button>'
         + '</form>'
       ));
     }
@@ -277,28 +283,26 @@ function createApp() {
     // interprets as "all enabled catalogs" — keeps the file small + lets new
     // catalogs auto-enable without the user re-saving.
     const finalCats = (cleanCats.length === allCatalogIds.size) ? [] : cleanCats;
-    const autoCache = {
-      rd: !!b.autoCacheRD,
-      tb: !!b.autoCacheTB,
-      pm: !!b.autoCachePM,
-    };
     // maxStreams: 0 = unlimited, 1-20 cap. Anything else is rejected silently.
     const maxStreamsRaw = parseInt(String(b.maxStreams || '0'), 10);
     const maxStreams = (Number.isFinite(maxStreamsRaw) && maxStreamsRaw >= 0 && maxStreamsRaw <= 20) ? maxStreamsRaw : 0;
     try {
+      // 0.33.0: active backend fields are uuManifestUrl + torboxApiKey.
+      // 0.34.0: Easynews creds drive Pipeline C (direct Easynews search).
+      // 0.36.0: dropped the rd / tb / pm / autoCache* hidden-input passthrough.
+      // Old values (if any) stay in users.json — updateUserConfig only patches
+      // the keys we name here, so legacy fields remain on disk but are no
+      // longer touched by the UI. The schema still includes them in users.js
+      // so existing records continue deserialising cleanly.
       users.updateUserConfig(req.user.id, {
-        // 0.33.0: two active backend fields. uuManifestUrl drives the
-        // Usenet handoff; torboxApiKey drives the TorBox resolution path
-        // (companion scraper returns hashes -> addon checks TorBox cache
-        // with this key -> resolved playable URLs returned).
         uuManifestUrl: String(b.uuManifestUrl || '').trim(),
         torboxApiKey: String(b.torboxApiKey || '').trim(),
-        rd: String(b.rd || '').trim(),
-        tb: String(b.tb || '').trim(),
-        pm: String(b.pm || '').trim(),
+        easynewsUsername: String(b.easynewsUsername || '').trim(),
+        easynewsPassword: String(b.easynewsPassword || ''),
         catalogs: finalCats,
-        autoCache,
         maxStreams,
+        // 0.38.0: warm-to-cache pseudo-streams toggle (default true).
+        showWarmRows: b.showWarmRows === 'on' || b.showWarmRows === '1' || b.showWarmRows === 'true',
       });
       res.redirect('/account?flash=saved');
     } catch (err) {
@@ -414,6 +418,74 @@ function createApp() {
       }
     });
 
+    // 0.38.0: Warm-to-cache route. Submits the magnet to the user's TorBox
+    // account (the side-effectful add we deliberately avoid in /stream and
+    // /resolve), then redirects to a tiny placeholder MP4 so Stremio's
+    // player has something to display. Rate-limited per-user to keep TB
+    // 429-safe under button-mashing.
+    const torboxResolverLib = require('./lib/sources/torbox-resolver');
+    const warmRateLimit = require('./lib/warm-rate-limit');
+    r.get('/warm/:provider/:eventId/:infoHash', async (req, res) => {
+      const { provider, eventId, infoHash } = req.params;
+      const userId = req.params.userId;
+      const username = req.userAccount.username;
+      const tag = '[warm u=' + username + ']';
+      const log = (m) => console.log(tag + ' ' + m);
+
+      // Verify the HMAC signature first — same scheme as /resolve.
+      const v = urlSign.verifyResolve({
+        userId,
+        provider: 'torbox-warm', eventId, infoHash,
+        exp: req.query.exp, sig: req.query.sig,
+      });
+      if (!v.ok) {
+        log('signature rejected (' + v.reason + ')');
+        return res.status(403).send('Warm link expired or invalid.');
+      }
+
+      // Provider check — currently warm is TorBox-only.
+      if (provider !== 'torbox') {
+        log('unsupported provider: ' + provider);
+        return res.status(404).send('Unsupported warm provider.');
+      }
+
+      // Rate-limit gate.
+      const rl = warmRateLimit.check(userId);
+      if (!rl.ok) {
+        log('rate-limited; retry in ' + rl.retryAfterSec + 's');
+        res.setHeader('Retry-After', String(rl.retryAfterSec));
+        return res.redirect(302, '/assets/warm-rate-limited.mp4');
+      }
+
+      // Hash sanity check.
+      if (!/^[a-f0-9]{40}$/i.test(String(infoHash || ''))) {
+        log('bad hash');
+        return res.redirect(302, '/assets/warm-failed.mp4');
+      }
+      const hash = String(infoHash).toLowerCase();
+
+      // Pull the user's TorBox key.
+      const creds = req.userAccount.config || {};
+      const torboxKey = (creds.torboxApiKey || '').trim();
+      if (!torboxKey) {
+        log('no torbox key on user — cannot warm');
+        return res.redirect(302, '/assets/warm-failed.mp4');
+      }
+
+      // Side-effectful add. We don't poll — fire-and-forget is the contract
+      // (see placeholder MP4 explanation in the README).
+      try {
+        const magnet = torboxResolverLib.buildMagnet(hash);
+        await torboxResolverLib.createTorrent(magnet, torboxKey, log);
+        log('queued ' + hash.slice(0, 10) + '… on user TorBox');
+        res.setHeader('Cache-Control', 'no-store');
+        return res.redirect(302, '/assets/warm-added.mp4');
+      } catch (err) {
+        log('createTorrent error: ' + err.message);
+        return res.redirect(302, '/assets/warm-failed.mp4');
+      }
+    });
+
     return r;
   }
 
@@ -493,11 +565,45 @@ function createApp() {
 
   // Manually trigger the proactive stream-candidate warmer. Fire-and-forget so
   // the admin gets an immediate redirect rather than blocking on the whole walk.
+  // 0.36.0: kept for backward compat with any external scripts hitting this
+  // endpoint, but the UI button now points at /admin/refresh-events instead
+  // (the events refresh is far more useful — populates newly-added custom
+  // promotions without waiting for the 6h scheduled refresh).
   app.post('/admin/refresh-streams', requireAdmin, (req, res) => {
     runStreamRefresh({ log: (m) => console.log(m) })
       .then((r) => console.log('[admin] manual stream warm: ' + JSON.stringify(r)))
       .catch((err) => console.error('[admin] manual stream warm failed:', err.message));
     res.redirect('/admin?flash=' + encodeURIComponent('Stream-cache warm started in the background — check server logs for progress.'));
+  });
+
+  // 0.36.0: Refresh catalogs button. Fires scripts/refresh.js (events from
+  // TSDB / Wikipedia / etc) rather than the stream warmer. Most useful right
+  // after adding a custom promotion via /admin/promotions — events show up
+  // in the catalog within ~minute(s) without waiting on the scheduled refresh.
+  app.post('/admin/refresh-events', requireAdmin, (req, res) => {
+    runEventsRefresh({ log: (m) => console.log(m) })
+      .then(() => console.log('[admin] manual events refresh complete'))
+      .catch((err) => console.error('[admin] manual events refresh failed:', err.message));
+    res.redirect('/admin?flash=' + encodeURIComponent('Catalog refresh started in the background — pulls events from TSDB for every promotion. Check server logs for progress.'));
+  });
+
+  // 0.41.0 — per-promotion refresh. Speeds up iteration when you're just
+  // tweaking one promotion (e.g. EPL aliases) — skips fetching sources for
+  // every other promotion. Events belonging to other promotions are
+  // preserved in the store untouched.
+  app.post('/admin/promotions/:id/refresh', requireAdmin, (req, res) => {
+    const id = String(req.params.id || '').trim();
+    const p = promotions.all.find((x) => x.id === id);
+    if (!p) {
+      return res.redirect('/admin/promotions?flash=' + encodeURIComponent('Refresh: promotion "' + id + '" not found'));
+    }
+    if (!p.enabled) {
+      return res.redirect('/admin/promotions?flash=' + encodeURIComponent('Refresh: promotion "' + id + '" is disabled'));
+    }
+    runEventsRefresh({ promotionId: id, log: (m) => console.log(m) })
+      .then((result) => console.log('[admin] per-promotion refresh "' + id + '" complete: ' + JSON.stringify(result)))
+      .catch((err) => console.error('[admin] per-promotion refresh "' + id + '" failed: ' + err.message));
+    res.redirect('/admin/promotions?flash=' + encodeURIComponent('Refresh started for "' + p.name + '" — other promotions untouched. Check server logs for progress.'));
   });
 
   // 0.28.0: admin per-event power tool. Pick an event, re-search its
@@ -683,30 +789,48 @@ function createApp() {
     });
   });
 
-  // Save the per-instance indexer source endpoints (Prowlarr + Zilean). These
-  // override env and apply live (no restart) because the sources read settings
-  // on each request.
+  // Save the companion-scraper endpoint.
+  //
+  // 0.36.0: stopped writing the legacy Prowlarr/Zilean fields from this
+  // form (they were already labelled "Unused by 0.33.0+" in the UI).
+  // Existing values in settings.json stay intact — we just no longer
+  // touch them on save. The metadata addon doesn't query Prowlarr/Zilean
+  // directly any more; the companion scraper owns indexer discovery.
   app.post('/admin/sources', requireAdmin, (req, res) => {
     const b = req.body || {};
     try {
-      // 0.33.0: indexer fields kept (Prowlarr/Zilean) for backward compat
-      // with older user installs, even though the metadata addon itself
-      // no longer queries them — scraping moved to the SeriousSportScraper
-      // companion service.
-      settings.setSources({
-        prowlarrUrl: String(b.prowlarrUrl || ''),
-        prowlarrApiKey: String(b.prowlarrApiKey || ''),
-        zileanUrl: String(b.zileanUrl || ''),
-      });
       settings.setCompanion({
         url: String(b.companionUrl || ''),
         authToken: String(b.companionAuthToken || ''),
+      });
+      // 0.38.1: football-data.org API key — admin-saved value wins over the
+      // FOOTBALL_DATA_API_KEY env var. Empty input is allowed (falls back to env).
+      settings.setFootballData({
+        apiKey: String(b.footballDataApiKey || ''),
       });
       res.redirect('/admin?flash=' + encodeURIComponent('Sources saved.'));
     } catch (err) {
       res.redirect('/admin?flash=' + encodeURIComponent('Save failed: ' + err.message));
     }
   });
+
+  // 0.39.0 — /admin/search: general search across both Prowlarr instances.
+  const generalSearch = require('./lib/admin-general-search');
+  app.get('/admin/search', requireAdmin, (req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    const body = generalSearch.renderBody({
+      query: req.query && req.query.q ? String(req.query.q) : '',
+      flash: req.query && req.query.flash ? String(req.query.flash) : null,
+    });
+    res.send(tablerChrome.tablerPage('Search', body, {
+      user: req.user,
+      layout: 'admin',
+      currentSection: 'search',
+    }));
+  });
+
+  app.post('/admin/search/scrape', requireAdmin, generalSearch.handleScrape);
+  app.post('/admin/search/grab',   requireAdmin, generalSearch.handleGrab);
 
   app.post('/admin/invites/create', requireAdmin, (req, res) => {
     const b = req.body || {};
@@ -723,6 +847,129 @@ function createApp() {
   app.post('/admin/invites/:token/revoke', requireAdmin, (req, res) => {
     const ok = users.revokeInvite(req.params.token);
     res.redirect('/admin?flash=' + encodeURIComponent(ok ? 'Invite revoked.' : 'Invite not found.'));
+  });
+
+  // --- 0.35.0: match editor (admin-editable alias + noise overrides) ---
+  const matchEditor = require('./lib/admin-match-editor');
+
+  app.get('/admin/match-editor', requireAdmin, (req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    const body = matchEditor.renderBody({
+      selectedPromotionId: String(req.query.promo || '').trim() || null,
+      flash: req.query.flash || null,
+    });
+    res.send(tablerChrome.tablerPage('Match editor', body, { user: req.user, currentSection: 'match-editor' }));
+  });
+
+  app.post('/admin/match-editor/save', requireAdmin, (req, res) => {
+    const promo = String((req.body && req.body.promo) || '').trim();
+    try {
+      matchEditor.saveFromForm(promo, req.body || {});
+      res.redirect('/admin/match-editor?promo=' + encodeURIComponent(promo)
+        + '&flash=' + encodeURIComponent('Overrides saved — takes effect on next /stream call (no restart needed).'));
+    } catch (err) {
+      res.redirect('/admin/match-editor?promo=' + encodeURIComponent(promo)
+        + '&flash=' + encodeURIComponent('Save failed: ' + err.message));
+    }
+  });
+
+  app.post('/admin/match-editor/clear', requireAdmin, (req, res) => {
+    const promo = String((req.body && req.body.promo) || '').trim();
+    try {
+      matchEditor.clearOverrides(promo);
+      res.redirect('/admin/match-editor?promo=' + encodeURIComponent(promo)
+        + '&flash=' + encodeURIComponent('All overrides cleared for this promotion.'));
+    } catch (err) {
+      res.redirect('/admin/match-editor?promo=' + encodeURIComponent(promo)
+        + '&flash=' + encodeURIComponent('Clear failed: ' + err.message));
+    }
+  });
+
+  // 0.35.0: test-bench JSON endpoint (called via fetch() from the editor page).
+  app.post('/admin/match-test', requireAdmin, (req, res) => {
+    const body = req.body || {};
+    const out = matchEditor.testMatch({
+      promotionId: String(body.promo || '').trim(),
+      eventId:     String(body.eventId || '').trim(),
+      title:       String(body.title || ''),
+    });
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(JSON.stringify(out));
+  });
+
+  // --- 0.35.0: promotion creator (admin-added TSDB-backed promotions) ---
+  const adminPromotions = require('./lib/admin-promotions');
+
+  app.get('/admin/promotions', requireAdmin, (req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    const body = adminPromotions.renderBody({
+      editId: String(req.query.edit || '').trim() || null,
+      flash:  req.query.flash || null,
+    });
+    res.send(tablerChrome.tablerPage('Promotions', body, { user: req.user, currentSection: 'promotions' }));
+  });
+
+  app.post('/admin/promotions/create', requireAdmin, (req, res) => {
+    try {
+      const spec = adminPromotions.saveFromForm(req.body || {});
+      res.redirect('/admin/promotions?flash=' + encodeURIComponent(
+        'Created custom promotion "' + spec.name + '". Run a refresh from /admin to populate its events.'));
+    } catch (err) {
+      res.redirect('/admin/promotions?flash=' + encodeURIComponent('Create failed: ' + err.message));
+    }
+  });
+
+  app.post('/admin/promotions/:id/update', requireAdmin, (req, res) => {
+    const id = req.params.id;
+    try {
+      adminPromotions.saveFromForm(req.body || {}, { updateId: id });
+      res.redirect('/admin/promotions?flash=' + encodeURIComponent('Updated "' + id + '".'));
+    } catch (err) {
+      res.redirect('/admin/promotions?edit=' + encodeURIComponent(id)
+        + '&flash=' + encodeURIComponent('Update failed: ' + err.message));
+    }
+  });
+
+  app.post('/admin/promotions/:id/delete', requireAdmin, (req, res) => {
+    const id = req.params.id;
+    try {
+      const ok = adminPromotions.deleteCustom(id);
+      res.redirect('/admin/promotions?flash=' + encodeURIComponent(
+        ok ? ('Deleted custom promotion "' + id + '". Stored events remain until next refresh purges them.')
+           : ('Promotion "' + id + '" not found or not deletable.')));
+    } catch (err) {
+      res.redirect('/admin/promotions?flash=' + encodeURIComponent('Delete failed: ' + err.message));
+    }
+  });
+
+  // TSDB league id pre-flight check — used by inline fetch() on the promotions
+  // form to confirm the entered id resolves to a real league before saving.
+  app.post('/admin/promotions/validate-leagueid', requireAdmin, async (req, res) => {
+    const out = await adminPromotions.validateLeagueId(String((req.body && req.body.leagueId) || ''));
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(JSON.stringify(out));
+  });
+
+  // 0.38.0: football-data.org competition validator. Same shape as the TSDB
+  // one, fed by the source-picker dropdown's "Check football-data" button.
+  app.post('/admin/promotions/validate-competition', requireAdmin, async (req, res) => {
+    const out = await adminPromotions.validateCompetitionId(String((req.body && req.body.competitionId) || ''));
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(JSON.stringify(out));
+  });
+
+  // 0.42.13: TMDB TV show validator. Same shape as TSDB/football-data validators,
+  // fed by the source-picker dropdown's "Check TMDB" button.
+  app.post('/admin/promotions/validate-tvid', requireAdmin, async (req, res) => {
+    const out = await adminPromotions.validateTvId(String((req.body && req.body.tvId) || ''));
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(JSON.stringify(out));
   });
 
   // --- Public invite redemption (no login required) ----------------
@@ -744,9 +991,9 @@ function createApp() {
       +   '<tr><th>Expires</th><td style="font-size:12px;">' + escapeHtml(inv.expiresAt.slice(0, 16).replace('T', ' ')) + '</td></tr>'
       + '</table>'
       + '<form method="POST" action="/invite/' + encodeURIComponent(req.params.token) + '">'
-      +   '<label class="lbl">Set your password</label>'
-      +   '<input class="inp" name="password" type="password" required minlength="8" placeholder="min 8 chars" autofocus>'
-      +   '<button class="btn-install" type="submit">Create account</button>'
+      +   '<label class="form-label">Set your password</label>'
+      +   '<input class="form-control" name="password" type="password" required minlength="8" placeholder="min 8 chars" autofocus>'
+      +   '<button class="btn btn-primary w-100 mt-3" type="submit">Create account</button>'
       + '</form>'
     ));
   });
@@ -784,155 +1031,210 @@ function renderAdminPage(currentUser, opts) {
   opts = opts || {};
   const all = users.listUsers();
 
-  let flashHtml = '';
-  if (opts.flash) {
-    flashHtml = '<div class="flash">' + escapeHtml(opts.flash) + '</div>';
-  }
+  const flashHtml = opts.flash
+    ? '<div class="alert alert-info alert-dismissible" role="alert">'
+      + '<div>' + escapeHtml(opts.flash) + '</div>'
+      + '<a class="btn-close" data-bs-dismiss="alert"></a>'
+      + '</div>'
+    : '';
 
-  // Active invites (server-generated tokens, redeemable at /invite/:token).
+  // Active invites — table + create form, all in a single card.
   users.cleanExpiredInvites();
   const invites = users.listInvites();
   const inviteRows = invites.map(function (i) {
     const url = '/invite/' + i.token;
     const exp = (i.expiresAt || '').slice(0, 16).replace('T', ' ');
+    const roleBadgeClass = i.role === 'admin' ? 'bg-red-lt' : 'bg-blue-lt';
     return ''
       + '<tr>'
       +   '<td><code>' + escapeHtml(i.username) + '</code></td>'
-      +   '<td><span class="badge badge-' + escapeHtml(i.role) + '">' + escapeHtml(i.role) + '</span></td>'
-      +   '<td style="font-size:12px;color:var(--muted);">' + escapeHtml(exp) + '</td>'
-      +   '<td class="install-cell"><code class="install-url" title="' + escapeHtml(url) + '">' + escapeHtml(url) + '</code> <button type="button" class="btn-copy btn-copy-sm" data-copy="' + escapeHtml(url) + '">Copy</button></td>'
-      +   '<td><form method="POST" action="/admin/invites/' + escapeHtml(i.token) + '/revoke" style="display:inline;" onsubmit="return confirm(\'Revoke invite for ' + escapeHtml(i.username) + '?\');"><button type="submit" class="btn-danger">Revoke</button></form></td>'
+      +   '<td><span class="badge ' + roleBadgeClass + '">' + escapeHtml(i.role) + '</span></td>'
+      +   '<td class="text-secondary small">' + escapeHtml(exp) + '</td>'
+      +   '<td>'
+      +     '<div class="input-group input-group-sm">'
+      +       '<input class="form-control text-mono" value="' + escapeHtml(url) + '" readonly>'
+      +       '<button type="button" class="btn btn-outline-primary btn-copy" data-copy="' + escapeHtml(url) + '">Copy</button>'
+      +     '</div>'
+      +   '</td>'
+      +   '<td><form method="POST" action="/admin/invites/' + escapeHtml(i.token) + '/revoke" class="d-inline" onsubmit="return confirm(\'Revoke invite for ' + escapeHtml(i.username) + '?\');"><button type="submit" class="btn btn-sm btn-outline-danger">Revoke</button></form></td>'
       + '</tr>';
   }).join('');
   const invitesHtml = ''
-    + '<h3 class="sec">Invites (' + invites.length + ')</h3>'
-    + '<p class="hint">Send the invite URL to the recipient. They set their own password on first visit. Invites expire after 7 days.</p>'
-    + (invites.length > 0
-        ? ('<table class="user-list"><thead><tr><th>Username</th><th>Role</th><th>Expires</th><th>Invite URL</th><th></th></tr></thead><tbody>' + inviteRows + '</tbody></table>')
-        : '<p style="color:var(--muted);font-size:13px;">No active invites.</p>')
-    + '<form method="POST" action="/admin/invites/create">'
-    +   '<label class="lbl">New invite — username</label>'
-    +   '<input class="inp" name="username" required minlength="3" maxlength="32" pattern="[A-Za-z0-9_.\\-]{3,32}" placeholder="3-32 chars, letters/digits/_-.">'
-    +   '<label class="lbl">Role</label>'
-    +   '<select class="inp" name="role"><option value="user" selected>user</option><option value="admin">admin</option></select>'
-    +   '<button class="btn-install" type="submit">Create invite</button>'
-    + '</form>';
+    + '<div class="card mb-3">'
+    +   '<div class="card-header"><h3 class="card-title">Invites (' + invites.length + ')</h3></div>'
+    +   '<div class="card-body">'
+    +     '<p class="text-secondary small mb-3">Send the invite URL to the recipient. They set their own password on first visit. Invites expire after 7 days.</p>'
+    +     (invites.length > 0
+        ? '<div class="table-responsive mb-3"><table class="table table-vcenter card-table"><thead><tr><th>Username</th><th>Role</th><th>Expires</th><th>Invite URL</th><th class="w-1"></th></tr></thead><tbody>' + inviteRows + '</tbody></table></div>'
+        : '<p class="text-secondary fst-italic mb-3">No active invites.</p>')
+    +     '<form method="POST" action="/admin/invites/create" class="row g-2 align-items-end">'
+    +       '<div class="col-md-6">'
+    +         '<label class="form-label">New invite — username</label>'
+    +         '<input class="form-control" name="username" required minlength="3" maxlength="32" pattern="[A-Za-z0-9_.\\-]{3,32}" placeholder="3-32 chars, letters/digits/_-.">'
+    +       '</div>'
+    +       '<div class="col-md-3">'
+    +         '<label class="form-label">Role</label>'
+    +         '<select class="form-select" name="role"><option value="user" selected>user</option><option value="admin">admin</option></select>'
+    +       '</div>'
+    +       '<div class="col-md-3">'
+    +         '<button class="btn btn-primary w-100" type="submit">Create invite</button>'
+    +       '</div>'
+    +     '</form>'
+    +   '</div>'
+    + '</div>';
 
+  // Users table (Tabler-styled).
   const rows = all.map(function (u) {
-    // NOTE: deliberately NOT exposing install URLs or API tokens here. Those are
-    // per-user secrets — an admin who could see them could install the addon as
-    // any user. They live only on each user's own account page. Admins can still
-    // rotate a token via "Regenerate token" below (without ever seeing it).
     const isMe = (u.id === currentUser.id);
     const created = (u.createdAt || '').slice(0, 10);
     const seen = u.lastSeen ? u.lastSeen.slice(0, 10) : '—';
+    const roleBadgeClass = u.role === 'admin' ? 'bg-red-lt' : 'bg-blue-lt';
     const deleteBtn = isMe
-      ? '<span style="color:var(--muted);font-size:12px;">(you)</span>'
-      : '<form method="POST" action="/admin/users/' + escapeHtml(u.id) + '/delete" style="display:inline;margin-left:8px;" onsubmit="return confirm(\'Delete user ' + escapeHtml(u.username) + '? This is permanent.\');"><button type="submit" class="btn-danger">Delete</button></form>';
-    const regenBtn = '<form method="POST" action="/admin/users/' + escapeHtml(u.id) + '/regenerate-token" style="display:inline;" onsubmit="return confirm(\'Regenerate API token for ' + escapeHtml(u.username) + '? Their old install URL will stop working immediately.\');"><button type="submit" class="btn-sm">Regenerate token</button></form>';
-    const roleSelect = '<form method="POST" action="/admin/users/' + escapeHtml(u.id) + '/set-role" style="display:inline;" onsubmit="return confirm(\'Change role for ' + escapeHtml(u.username) + '?\');">'
-      + '<select name="role" class="inp-sm" style="display:inline;width:auto;padding:3px 6px;font-size:11px;">'
-      +   '<option value="user"'  + (u.role === 'user'  ? ' selected' : '') + '>user</option>'
-      +   '<option value="admin"' + (u.role === 'admin' ? ' selected' : '') + '>admin</option>'
-      + '</select> <button type="submit" class="btn-sm">Set role</button></form>';
+      ? '<span class="text-secondary small">(you)</span>'
+      : '<form method="POST" action="/admin/users/' + escapeHtml(u.id) + '/delete" class="d-inline" onsubmit="return confirm(\'Delete user ' + escapeHtml(u.username) + '? This is permanent.\');"><button type="submit" class="btn btn-sm btn-outline-danger">Delete</button></form>';
+    const regenBtn = '<form method="POST" action="/admin/users/' + escapeHtml(u.id) + '/regenerate-token" class="d-inline" onsubmit="return confirm(\'Regenerate API token for ' + escapeHtml(u.username) + '? Their old install URL will stop working immediately.\');"><button type="submit" class="btn btn-sm btn-outline-primary">Regenerate token</button></form>';
+    const roleSelect = '<form method="POST" action="/admin/users/' + escapeHtml(u.id) + '/set-role" class="d-inline" onsubmit="return confirm(\'Change role for ' + escapeHtml(u.username) + '?\');">'
+      + '<div class="input-group input-group-sm d-inline-flex" style="width:auto;">'
+      +   '<select name="role" class="form-select form-select-sm">'
+      +     '<option value="user"'  + (u.role === 'user'  ? ' selected' : '') + '>user</option>'
+      +     '<option value="admin"' + (u.role === 'admin' ? ' selected' : '') + '>admin</option>'
+      +   '</select>'
+      +   '<button type="submit" class="btn btn-outline-primary btn-sm">Set</button>'
+      + '</div></form>';
 
-    const setPwForm = '<details style="display:inline-block;margin-left:6px;"><summary class="btn-sm" style="display:inline-block;list-style:none;cursor:pointer;">Set password</summary>'
-      + '<form method="POST" action="/admin/users/' + escapeHtml(u.id) + '/set-password" style="display:inline-block;margin-top:6px;padding:8px;background:rgba(255,255,255,0.03);border-radius:6px;">'
-      +   '<input type="password" name="newPassword" required minlength="8" placeholder="new password" class="inp" style="display:inline-block;width:180px;padding:5px 8px;font-size:12px;margin:0 6px 0 0;">'
-      +   '<button type="submit" class="btn-sm">Save</button>'
+    const setPwForm = '<details class="d-inline-block ms-1">'
+      + '<summary class="btn btn-sm btn-outline-primary" style="list-style:none;cursor:pointer;">Set password</summary>'
+      + '<form method="POST" action="/admin/users/' + escapeHtml(u.id) + '/set-password" class="mt-2 p-2 border rounded">'
+      +   '<div class="input-group input-group-sm">'
+      +     '<input type="password" name="newPassword" required minlength="8" placeholder="new password" class="form-control">'
+      +     '<button type="submit" class="btn btn-primary">Save</button>'
+      +   '</div>'
       + '</form></details>';
 
     return ''
       + '<tr>'
-      +   '<td><code>' + escapeHtml(u.username) + '</code>' + (isMe ? ' <span style="color:var(--muted);font-size:11px;">(you)</span>' : '') + '</td>'
-      +   '<td><span class="badge badge-' + escapeHtml(u.role) + '">' + escapeHtml(u.role) + '</span></td>'
-      +   '<td style="font-size:12px;color:var(--muted);">' + escapeHtml(created) + '</td>'
-      +   '<td style="font-size:12px;color:var(--muted);">' + escapeHtml(seen) + '</td>'
-      +   '<td class="admin-actions">' + roleSelect + setPwForm + regenBtn + deleteBtn + '</td>'
+      +   '<td><code>' + escapeHtml(u.username) + '</code>' + (isMe ? ' <span class="text-secondary small">(you)</span>' : '') + '</td>'
+      +   '<td><span class="badge ' + roleBadgeClass + '">' + escapeHtml(u.role) + '</span></td>'
+      +   '<td class="text-secondary small">' + escapeHtml(created) + '</td>'
+      +   '<td class="text-secondary small">' + escapeHtml(seen) + '</td>'
+      +   '<td class="text-nowrap"><div class="d-flex flex-wrap gap-1 align-items-center">' + roleSelect + setPwForm + regenBtn + deleteBtn + '</div></td>'
       + '</tr>';
   }).join('');
 
-  // Stream-cache status + manual warm trigger.
+  // Stream-cache stats for the refresh card. The actual button drives
+  // /admin/refresh-events (the catalog-events refresh, not the stream warmer).
   let scStats = { total: 0, fresh: 0, stale: 0, updatedAt: null, ttlHours: 0 };
   try { scStats = streamcache.stats(); } catch (e) { /* file may not exist yet */ }
   const scUpdated = scStats.updatedAt ? scStats.updatedAt.slice(0, 16).replace('T', ' ') : 'never';
-  const scWarmer = config.streamCache.refresh
-    ? ('every ' + config.streamCache.refreshHours + 'h')
-    : 'disabled (STREAM_CACHE_REFRESH=off)';
-  const streamCacheHtml = ''
-    + '<h3 class="sec">Stream cache</h3>'
-    + '<p class="hint">Cached indexer results (Prowlarr + Zilean candidates) per event, so stream requests skip the live search. TTL ' + scStats.ttlHours + 'h. Auto-warm: ' + escapeHtml(scWarmer) + '.</p>'
-    + '<p style="font-size:13px;color:var(--muted);margin:0 0 10px;">'
-    +   '<strong style="color:var(--text);">' + scStats.fresh + '</strong> fresh / '
-    +   '<strong style="color:var(--text);">' + scStats.total + '</strong> cached events'
-    +   ' &middot; last warmed ' + escapeHtml(scUpdated)
-    + '</p>'
-    + '<form method="POST" action="/admin/refresh-streams" style="display:inline;">'
-    +   '<button class="btn-install" type="submit">Warm stream cache now</button>'
-    + '</form>';
 
-  // 0.33.0: companion-scraper URL is the primary content config. Legacy
-  // Prowlarr/Zilean fields are now informational only (the addon doesn't
-  // call them — scraping moved to the companion service).
+  // 0.33.0: companion-scraper URL is the primary content config.
   const _comp = settings.getCompanion();
-  const _pw = settings.getProwlarr();
-  const _zl = settings.getZilean();
-  const sourcesHtml = ''
-    + '<h3 class="sec">Companion scraper</h3>'
-    + '<p class="hint">URL of the SeriousSportScraper companion service you have deployed. The metadata addon delegates content discovery to it and resolves the returned hashes through each user\'s own TorBox key. Leave blank to disable the TorBox pipeline.</p>'
-    + '<form method="POST" action="/admin/sources">'
-    +   '<label class="lbl">Companion URL</label>'
-    +   '<input class="inp mono" name="companionUrl" value="' + escapeHtml(_comp.url) + '" placeholder="http://scraper:8080" autocomplete="off">'
-    +   secretField('Companion auth token (optional)', 'companionAuthToken', _comp.authToken, 'shared bearer if scraper is internet-exposed')
-    + '<h3 class="sec" style="margin-top:18px;">Legacy indexer sources</h3>'
-    + '<p class="hint">Unused by 0.33.0+ — kept so existing values are preserved across upgrades.</p>'
-    +   '<label class="lbl">Prowlarr URL (legacy)</label>'
-    +   '<input class="inp mono" name="prowlarrUrl" value="' + escapeHtml(_pw.url) + '" placeholder="(legacy, unused by 0.33.0+)" autocomplete="off">'
-    +   secretField('Prowlarr API key (legacy)', 'prowlarrApiKey', _pw.apiKey, 'unused by 0.33.0+')
-    +   '<label class="lbl">Zilean URL (legacy)</label>'
-    +   '<input class="inp mono" name="zileanUrl" value="' + escapeHtml(_zl.url) + '" placeholder="(legacy, unused by 0.33.0+)" autocomplete="off">'
-    +   '<button class="btn-install" type="submit">Save sources</button>'
-    + '</form>';
+  // 0.38.1: football-data.org API key field on /admin Sources so admins can
+  // save/rotate the key without editing docker-compose.yml.
+  const _fd = settings.getFootballData();
 
   const body = ''
-    + '<p style="color:var(--muted);font-size:13px;margin:0 0 16px;">'
-    +   'Admin panel — manage users for this SeriousSportSync instance. '
-    +   'Logged in as <code>' + escapeHtml(currentUser.username) + '</code>.'
-    + '</p>'
-    + flashHtml
-    + sourcesHtml
-    + '<h3 class="sec">Users (' + all.length + ')</h3>'
-    + '<table class="user-list">'
-    +   '<thead><tr>'
-    +     '<th>Username</th><th>Role</th><th>Created</th><th>Last seen</th>'
-    +     '<th></th>'
-    +   '</tr></thead>'
-    +   '<tbody>' + rows + '</tbody>'
-    + '</table>'
-    + '<h3 class="sec">Create a new user</h3>'
-    + '<p class="hint">After creating a user, they log in at the root URL and copy their own install URL from their account page. Install URLs and API tokens are private to each user and are never shown here.</p>'
-    + '<form method="POST" action="/admin/users/create">'
-    +   '<label class="lbl">Username</label>'
-    +   '<input class="inp" name="username" required minlength="3" maxlength="32" pattern="[A-Za-z0-9_.\\-]{3,32}" placeholder="3-32 chars, letters/digits/_-.">'
-    +   '<label class="lbl">Password</label>'
-    +   '<input class="inp" name="password" type="password" required minlength="8" placeholder="min 8 chars">'
-    +   '<label class="lbl">Role</label>'
-    +   '<select class="inp" name="role"><option value="user" selected>user</option><option value="admin">admin</option></select>'
-    +   '<button class="btn-install" type="submit">Create user</button>'
-    + '</form>'
-    + streamCacheHtml
-    + '<script>document.addEventListener("click",function(e){var b=e.target&&e.target.closest?e.target.closest(".btn-reveal"):null;if(!b)return;e.preventDefault();var i=b.parentNode.querySelector("input");if(!i)return;var sh=i.type==="password";i.type=sh?"text":"password";b.textContent=sh?"Hide":"Show";});document.addEventListener("click",function(e){var c=e.target&&e.target.closest?e.target.closest(".btn-copy"):null;if(!c)return;var u=c.getAttribute("data-copy");if(!u)return;if(navigator.clipboard)navigator.clipboard.writeText(u);var t=c.textContent;c.textContent="Copied!";setTimeout(function(){c.textContent=t;},1500);});</script>'
-    + '<div style="margin-top:24px;padding-top:18px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">'
-    +   '<a href="/account" style="color:var(--accent);text-decoration:none;font-weight:500;">← Back to your account</a>'
-    +   '<div style="display:flex;gap:14px;">'
-    +     '<a href="/admin/health" style="color:var(--text);text-decoration:none;font-size:13px;">📊 Health</a>'
-    +     '<a href="/admin/logs" style="color:var(--text);text-decoration:none;font-size:13px;">📜 Logs</a>'
-    +     '<a href="/admin/power-tool" style="color:var(--text);text-decoration:none;font-size:13px;">🛠️ Power Tool</a>'
-    +     '<a href="/admin/backup" style="color:var(--text);text-decoration:none;font-size:13px;">⬇️ Backup</a>'
+    + '<div class="page-header">'
+    +   '<div class="row align-items-center">'
+    +     '<div class="col">'
+    +       '<h2 class="page-title">Admin</h2>'
+    +       '<div class="text-secondary mt-1">Admin panel — manage users for this SeriousSportSync instance. Logged in as <code>' + escapeHtml(currentUser.username) + '</code>.</div>'
+    +     '</div>'
     +   '</div>'
-    + '</div>';
+    + '</div>'
+    + flashHtml
 
-  return accountPage('Admin — SeriousSportSync', body, 'admin');
+    // Companion scraper config
+    + '<div class="card mb-3">'
+    +   '<div class="card-header"><h3 class="card-title">Companion scraper</h3></div>'
+    +   '<div class="card-body">'
+    +     '<p class="text-secondary small mb-3">URL of the SeriousSportScraper companion service you have deployed. The metadata addon delegates content discovery to it and resolves the returned hashes through each user\'s own TorBox key. Leave blank to disable the TorBox pipeline.</p>'
+    +     '<form method="POST" action="/admin/sources">'
+    +       '<div class="mb-3">'
+    +         '<label class="form-label">Companion URL</label>'
+    +         '<input class="form-control text-mono" name="companionUrl" value="' + escapeHtml(_comp.url) + '" placeholder="http://scraper:8080" autocomplete="off">'
+    +       '</div>'
+    +       secretField('Companion auth token (optional)', 'companionAuthToken', _comp.authToken, 'shared bearer if scraper is internet-exposed')
+
+    // 0.38.1: football-data.org API key block. Saved value overrides
+    // FOOTBALL_DATA_API_KEY env var. Used by custom promotions whose source
+    // === 'football-data' (FIFA WC, EPL, Champions League, etc.).
+    +       '<hr class="my-4">'
+    +       '<h4 class="mb-2">football-data.org</h4>'
+    +       '<p class="text-secondary small mb-3">API key for the football-data.org parallel source — used by custom promotions whose source is set to football-data (FIFA WC, EPL, Champions League, etc.). Free tier covers ~10 req/min. Sign up at <a href="https://www.football-data.org/client/register" target="_blank" rel="noopener" class="link-primary">football-data.org/client/register</a>. Saving here overrides the FOOTBALL_DATA_API_KEY env var.</p>'
+    +       secretField('football-data.org API key', 'footballDataApiKey', _fd.apiKey, 'paste your football-data.org token')
+
+    // 0.39.0: general-search config lives on the scraper, not SSS. Indexer
+    // sources are configured in the scraper at /sources; downloader targets
+    // (qBit + SAB) at /downloaders. SSS only proxies — see /admin/search.
+    +       '<hr class="my-4">'
+    +       '<h4 class="mb-2">General search</h4>'
+    +       '<p class="text-secondary small mb-0">The <a href="/admin/search" class="link-primary">/admin/search</a> page proxies through to the companion scraper above. Configure Prowlarr instances on the scraper\'s <a href="' + escapeHtml(_comp.url || '#') + '/sources" target="_blank" rel="noopener" class="link-primary">Sources</a> page and qBit / SAB credentials on its <a href="' + escapeHtml(_comp.url || '#') + '/downloaders" target="_blank" rel="noopener" class="link-primary">Downloaders</a> page (scraper v0.1.4+).</p>'
+
+    +       '<hr class="my-4">'
+    +       '<button class="btn btn-primary" type="submit">Save sources</button>'
+    +     '</form>'
+    +   '</div>'
+    + '</div>'
+
+    // Catalogs / refresh
+    + '<div class="card mb-3">'
+    +   '<div class="card-header"><h3 class="card-title">Catalogs</h3></div>'
+    +   '<div class="card-body">'
+    +     '<p class="text-secondary small mb-3">Pulls fresh event metadata from TSDB (and any other configured sources) for every enabled promotion — built-in and custom. Runs in the background; scheduled refresh fires every 6h regardless. Use this button after adding a new custom promotion so its events appear without waiting on the scheduler.</p>'
+    +     '<p class="text-secondary small mb-3">Stream candidate cache: <strong>' + scStats.fresh + '</strong> fresh / <strong>' + scStats.total + '</strong> cached events · last warmed ' + escapeHtml(scUpdated) + '</p>'
+    +     '<form method="POST" action="/admin/refresh-events" class="d-inline">'
+    +       '<button class="btn btn-primary" type="submit">Refresh catalogs now</button>'
+    +     '</form>'
+    +   '</div>'
+    + '</div>'
+
+    // Users
+    + '<div class="card mb-3">'
+    +   '<div class="card-header"><h3 class="card-title">Users (' + all.length + ')</h3></div>'
+    +   '<div class="table-responsive">'
+    +     '<table class="table table-vcenter card-table">'
+    +       '<thead><tr><th>Username</th><th>Role</th><th>Created</th><th>Last seen</th><th class="w-1"></th></tr></thead>'
+    +       '<tbody>' + rows + '</tbody>'
+    +     '</table>'
+    +   '</div>'
+    + '</div>'
+
+    // Create new user
+    + '<div class="card mb-3">'
+    +   '<div class="card-header"><h3 class="card-title">Create a new user</h3></div>'
+    +   '<div class="card-body">'
+    +     '<p class="text-secondary small mb-3">After creating a user, they log in at the root URL and copy their own install URL from their account page. Install URLs and API tokens are private to each user and are never shown here.</p>'
+    +     '<form method="POST" action="/admin/users/create" class="row g-2 align-items-end">'
+    +       '<div class="col-md-4">'
+    +         '<label class="form-label">Username</label>'
+    +         '<input class="form-control" name="username" required minlength="3" maxlength="32" pattern="[A-Za-z0-9_.\\-]{3,32}" placeholder="3-32 chars">'
+    +       '</div>'
+    +       '<div class="col-md-3">'
+    +         '<label class="form-label">Password</label>'
+    +         '<input class="form-control" name="password" type="password" required minlength="8" placeholder="min 8 chars">'
+    +       '</div>'
+    +       '<div class="col-md-2">'
+    +         '<label class="form-label">Role</label>'
+    +         '<select class="form-select" name="role"><option value="user" selected>user</option><option value="admin">admin</option></select>'
+    +       '</div>'
+    +       '<div class="col-md-3">'
+    +         '<button class="btn btn-primary w-100" type="submit">Create user</button>'
+    +       '</div>'
+    +     '</form>'
+    +   '</div>'
+    + '</div>'
+
+    + invitesHtml
+
+    // Shared inline JS: password show/toggle + copy button.
+    // (Sidebar nav links replaced the bottom footer strip — chrome handles nav.)
+    + '<script>'
+    + 'document.addEventListener("click",function(e){var b=e.target&&e.target.closest?e.target.closest(".btn-reveal"):null;if(!b)return;e.preventDefault();var g=b.closest(".input-group");if(!g)return;var i=g.querySelector("input");if(!i)return;var sh=i.type==="password";i.type=sh?"text":"password";b.textContent=sh?"Hide":"Show";});'
+    + 'document.addEventListener("click",function(e){var c=e.target&&e.target.closest?e.target.closest(".btn-copy"):null;if(!c)return;var u=c.getAttribute("data-copy");if(!u)return;if(navigator.clipboard)navigator.clipboard.writeText(u);var t=c.textContent;c.textContent="Copied!";setTimeout(function(){c.textContent=t;},1500);});'
+    + '</script>';
+
+  return tablerChrome.tablerPage('Admin', body, { user: currentUser, currentSection: 'admin' });
 }
 
 // 0.24.0: admin observability page. Pure render — no state mutation. All the
@@ -940,29 +1242,38 @@ function renderAdminPage(currentUser, opts) {
 // and scripts/refresh-streams' status file.
 function renderHealthPage(currentUser, opts) {
   opts = opts || {};
-  let flashHtml = '';
-  if (opts.flash) {
-    flashHtml = '<div class="flash">' + escapeHtml(opts.flash) + '</div>';
+  const flashHtml = opts.flash
+    ? '<div class="alert alert-info alert-dismissible" role="alert">'
+      + '<div>' + escapeHtml(opts.flash) + '</div>'
+      + '<a class="btn-close" data-bs-dismiss="alert"></a>'
+      + '</div>'
+    : '';
+
+  // Helper: Tabler stat card with title + value + sub + optional action button.
+  function statCard(title, valueHtml, subHtml, actionHtml) {
+    return ''
+      + '<div class="col-sm-6 col-lg-4">'
+      +   '<div class="card">'
+      +     '<div class="card-body">'
+      +       '<div class="subheader mb-2">' + title + '</div>'
+      +       '<div class="h2 mb-1">' + valueHtml + '</div>'
+      +       (subHtml ? '<div class="text-secondary small">' + subHtml + '</div>' : '')
+      +       (actionHtml ? '<div class="mt-3">' + actionHtml + '</div>' : '')
+      +     '</div>'
+      +   '</div>'
+      + '</div>';
   }
 
-  // Helpers: compact stat blocks + wipe buttons.
   function denyCard(provider, dl) {
     let s = { total: 0, fresh: 0, stale: 0, hard: 0, soft: 0, ttlDays: 0, softTtlHours: 0 };
     try { s = dl.stats(); } catch (e) { /* file may not exist yet */ }
     const kind = provider.toLowerCase() + '-denylist';
-    return ''
-      + '<div class="health-card">'
-      +   '<h3>' + provider + ' denylist</h3>'
-      +   '<div class="health-row"><strong>' + s.fresh + '</strong> fresh ('
-      +     s.hard + ' hard, ' + s.soft + ' soft)</div>'
-      +   '<div class="health-row health-sub">' + s.stale + ' stale &middot; hard TTL '
-      +     s.ttlDays + 'd &middot; soft TTL ' + s.softTtlHours + 'h</div>'
-      +   '<form method="POST" action="/admin/health/wipe/' + kind + '" '
-      +     'onsubmit="return confirm(\'Wipe the ' + provider + ' denylist? '
-      +     'All ' + s.fresh + ' entries will be removed.\');" style="margin-top:8px;">'
-      +     '<button type="submit" class="btn-sm btn-danger">Wipe</button>'
-      +   '</form>'
-      + '</div>';
+    const value = '<strong>' + s.fresh + '</strong> <span class="text-secondary fs-4">fresh</span>';
+    const sub = s.hard + ' hard, ' + s.soft + ' soft &middot; ' + s.stale + ' stale &middot; hard TTL ' + s.ttlDays + 'd &middot; soft TTL ' + s.softTtlHours + 'h';
+    const action = '<form method="POST" action="/admin/health/wipe/' + kind + '" onsubmit="return confirm(\'Wipe the ' + provider + ' denylist? All ' + s.fresh + ' entries will be removed.\');" class="d-inline">'
+      + '<button type="submit" class="btn btn-sm btn-outline-danger">Wipe</button>'
+      + '</form>';
+    return statCard(provider + ' denylist', value, sub, action);
   }
 
   // Positive cache
@@ -971,92 +1282,73 @@ function renderHealthPage(currentUser, opts) {
   const byProvText = ['rd', 'tb', 'pm']
     .map((p) => p.toUpperCase() + ': ' + (posS.byProvider[p] || 0))
     .join(' &middot; ');
-  const positiveCardHtml = ''
-    + '<div class="health-card">'
-    +   '<h3>Positive cache</h3>'
-    +   '<div class="health-row"><strong>' + posS.freshEntries + '</strong> fresh entr'
-    +     (posS.freshEntries === 1 ? 'y' : 'ies') + ' across <strong>'
-    +     posS.totalHashes + '</strong> hash' + (posS.totalHashes === 1 ? '' : 'es') + '</div>'
-    +   '<div class="health-row health-sub">' + byProvText + ' &middot; TTL ' + posS.ttlDays + 'd</div>'
-    +   '<form method="POST" action="/admin/health/wipe/positive-cache" '
-    +     'onsubmit="return confirm(\'Wipe positive cache? All known-cached '
-    +     '(hash, provider) entries will be removed.\');" style="margin-top:8px;">'
-    +     '<button type="submit" class="btn-sm btn-danger">Wipe</button>'
-    +   '</form>'
-    + '</div>';
+  const positiveCardHtml = statCard(
+    'Positive cache',
+    '<strong>' + posS.freshEntries + '</strong> <span class="text-secondary fs-4">fresh entr' + (posS.freshEntries === 1 ? 'y' : 'ies') + '</span>',
+    'across ' + posS.totalHashes + ' hash' + (posS.totalHashes === 1 ? '' : 'es') + ' &middot; ' + byProvText + ' &middot; TTL ' + posS.ttlDays + 'd',
+    '<form method="POST" action="/admin/health/wipe/positive-cache" onsubmit="return confirm(\'Wipe positive cache? All known-cached (hash, provider) entries will be removed.\');" class="d-inline">'
+      + '<button type="submit" class="btn btn-sm btn-outline-danger">Wipe</button>'
+      + '</form>'
+  );
 
-  // Stream / candidate cache
+  // Candidate cache
   let scS = { total: 0, fresh: 0, stale: 0, updatedAt: null, ttlHours: 0 };
   try { scS = streamcache.stats(); } catch (e) { /* */ }
   const scUpdated = scS.updatedAt ? scS.updatedAt.slice(0, 16).replace('T', ' ') : 'never';
-  const streamCacheCardHtml = ''
-    + '<div class="health-card">'
-    +   '<h3>Candidate cache</h3>'
-    +   '<div class="health-row"><strong>' + scS.fresh + '</strong> fresh / <strong>'
-    +     scS.total + '</strong> total events</div>'
-    +   '<div class="health-row health-sub">TTL ' + scS.ttlHours + 'h &middot; last warmed ' + escapeHtml(scUpdated) + '</div>'
-    +   '<form method="POST" action="/admin/refresh-streams" style="margin-top:8px;">'
-    +     '<button type="submit" class="btn-sm">Warm now</button>'
-    +   '</form>'
-    + '</div>';
+  const streamCacheCardHtml = statCard(
+    'Candidate cache',
+    '<strong>' + scS.fresh + '</strong> <span class="text-secondary fs-4">/ ' + scS.total + ' fresh</span>',
+    'TTL ' + scS.ttlHours + 'h &middot; last warmed ' + escapeHtml(scUpdated),
+    '<form method="POST" action="/admin/refresh-streams" class="d-inline">'
+      + '<button type="submit" class="btn btn-sm btn-outline-primary">Warm now</button>'
+      + '</form>'
+  );
 
   // Warmer last run
   let w = null;
   try { w = readWarmerStatus && readWarmerStatus(); } catch (e) { w = null; }
   let warmerCardHtml;
   if (w) {
-    const startStr = (w.lastRunStart || '').slice(0, 16).replace('T', ' ');
-    const endStr   = (w.lastRunEnd   || '').slice(0, 16).replace('T', ' ');
+    const endStr = (w.lastRunEnd || '').slice(0, 16).replace('T', ' ');
     const verifyLine = w.verifyEnabled
-      ? 'TB: ' + (w.tbHits || 0) + ' cached / ' + (w.tbMisses || 0) + ' not &middot; '
-        + 'PM: ' + (w.pmHits || 0) + ' cached / ' + (w.pmMisses || 0) + ' not'
+      ? 'TB: ' + (w.tbHits || 0) + ' cached / ' + (w.tbMisses || 0) + ' not &middot; PM: ' + (w.pmHits || 0) + ' cached / ' + (w.pmMisses || 0) + ' not'
       : 'verification disabled (set WARMER_TB_TOKEN / WARMER_PM_KEY)';
-    warmerCardHtml = ''
-      + '<div class="health-card">'
-      +   '<h3>Last warmer run</h3>'
-      +   '<div class="health-row"><strong>' + (w.warmed || 0) + '</strong> warmed, '
-      +     (w.failed || 0) + ' failed, ' + (w.totalCands || 0) + ' total candidates</div>'
-      +   '<div class="health-row health-sub">' + verifyLine + '</div>'
-      +   '<div class="health-row health-sub">window &minus;' + (w.windowDaysBack || 0)
-      +     'd / +' + (w.windowDaysAhead || 0) + 'd &middot; '
-      +     (w.durationSeconds || 0) + 's &middot; finished ' + escapeHtml(endStr) + '</div>'
-      + '</div>';
+    warmerCardHtml = statCard(
+      'Last warmer run',
+      '<strong>' + (w.warmed || 0) + '</strong> <span class="text-secondary fs-4">warmed</span>',
+      (w.failed || 0) + ' failed, ' + (w.totalCands || 0) + ' total candidates &middot; ' + verifyLine
+        + ' &middot; window &minus;' + (w.windowDaysBack || 0) + 'd / +' + (w.windowDaysAhead || 0) + 'd'
+        + ' &middot; ' + (w.durationSeconds || 0) + 's &middot; finished ' + escapeHtml(endStr),
+      null
+    );
   } else {
-    warmerCardHtml = ''
-      + '<div class="health-card">'
-      +   '<h3>Last warmer run</h3>'
-      +   '<div class="health-row health-sub">No warmer run recorded yet. The warmer runs every '
-      +     config.streamCache.refreshHours + 'h (scheduled in server.js) or trigger one with the "Warm now" button.</div>'
-      + '</div>';
+    warmerCardHtml = statCard(
+      'Last warmer run',
+      '<span class="text-secondary fs-3">No data</span>',
+      'No warmer run recorded yet. The warmer runs every ' + config.streamCache.refreshHours + 'h (scheduled) or via "Warm now".',
+      null
+    );
   }
 
   // Backup card
-  const backupCardHtml = ''
-    + '<div class="health-card">'
-    +   '<h3>Backup</h3>'
-    +   '<div class="health-row health-sub">Download a timestamped tar.gz of /app/data (events, users, denylists, positive cache, stream cache, warmer status).</div>'
-    +   '<a href="/admin/backup" class="btn-sm" style="display:inline-block;margin-top:8px;text-decoration:none;">Download backup</a>'
-    + '</div>';
+  const backupCardHtml = statCard(
+    'Backup',
+    '<span class="text-secondary fs-3">tar.gz</span>',
+    'Timestamped tar.gz of /app/data (events, users, denylists, positive cache, stream cache, warmer status).',
+    '<a href="/admin/backup" class="btn btn-sm btn-outline-primary">Download backup</a>'
+  );
 
-  // Inline styles tucked into the body (kept self-contained — no need to
-  // touch the shared accountPage CSS for this one page).
-  const styles = ''
-    + '<style>'
-    +   '.health-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-top:8px;}'
-    +   '.health-card{background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:10px;padding:14px 16px;}'
-    +   '.health-card h3{margin:0 0 10px;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600;}'
-    +   '.health-row{font-size:14px;line-height:1.5;}'
-    +   '.health-row.health-sub{font-size:12px;color:var(--muted);margin-top:2px;}'
-    +   '.btn-danger{background:#2a0608 !important;color:var(--accent2) !important;border:1px solid #4a1015 !important;}'
-    + '</style>';
-
-  const body = styles
-    + '<p style="color:var(--muted);font-size:13px;margin:0 0 16px;">'
-    +   'Admin observability — denylists, positive cache, warmer status, candidate cache. '
-    +   'Logged in as <code>' + escapeHtml(currentUser.username) + '</code>.'
-    + '</p>'
+  const body = ''
+    + '<div class="page-header">'
+    +   '<div class="row align-items-center">'
+    +     '<div class="col">'
+    +       '<h2 class="page-title">Health</h2>'
+    +       '<div class="text-secondary mt-1">Admin observability — denylists, positive cache, warmer status, candidate cache.</div>'
+    +     '</div>'
+    +   '</div>'
+    + '</div>'
     + flashHtml
-    + '<div class="health-grid">'
+    + '<div class="row row-cards">'
     +   denyCard('RD', rdDenylist)
     +   denyCard('TB', tbDenylist)
     +   denyCard('PM', pmDenylist)
@@ -1064,12 +1356,9 @@ function renderHealthPage(currentUser, opts) {
     +   streamCacheCardHtml
     +   warmerCardHtml
     +   backupCardHtml
-    + '</div>'
-    + '<div style="margin-top:24px;padding-top:18px;border-top:1px solid var(--border);">'
-    +   '<a href="/admin" style="color:var(--accent);text-decoration:none;font-weight:500;">← Back to admin</a>'
     + '</div>';
 
-  return accountPage('Health — SeriousSportSync', body, 'admin');
+  return tablerChrome.tablerPage('Health', body, { user: currentUser, currentSection: 'health' });
 }
 
 // 0.27.0: in-GUI log viewer. Filters (category / user / substring / level)
@@ -1087,52 +1376,56 @@ function renderLogsPage(currentUser, q) {
   const stats = logBuffer.counts();
   const rows = logBuffer.filtered({ category, user: userFilter, substring, level, limit });
 
-  // Discoverable category list — start with known + any seen in stats.
   const knownCats = ['stream','resolve','warm','refresh','admin','server','denylist','positive-cache','dead-indexer','onefc','crypto-keys','streamcache','users','other'];
   const seenCats = new Set(Object.keys(stats.byCategory || {}));
   knownCats.forEach((c) => seenCats.add(c));
   const cats = ['all', ...Array.from(seenCats).sort()];
 
   const opt = (val, sel) => '<option value="' + escapeHtml(val) + '"' + (val === sel ? ' selected' : '') + '>' + escapeHtml(val) + '</option>';
+
   const rowHtml = (e) => {
     const time = new Date(e.ts).toISOString().replace('T', ' ').slice(0, 19);
-    const lvlClass = e.level === 'error' ? 'log-error' : e.level === 'warn' ? 'log-warn' : 'log-log';
-    return '<tr class="' + lvlClass + '">'
-      +   '<td class="log-ts">' + escapeHtml(time) + '</td>'
-      +   '<td class="log-cat"><span class="cat-tag">' + escapeHtml(e.category) + '</span></td>'
-      +   '<td class="log-usr">' + escapeHtml(e.user || '') + '</td>'
-      +   '<td class="log-lvl">' + escapeHtml(e.level) + '</td>'
-      +   '<td class="log-line">' + escapeHtml(e.line) + '</td>'
+    const lvlBadgeClass = e.level === 'error' ? 'bg-red-lt' : e.level === 'warn' ? 'bg-yellow-lt' : 'bg-secondary-lt';
+    return '<tr>'
+      +   '<td class="text-secondary text-mono" style="width:160px;">' + escapeHtml(time) + '</td>'
+      +   '<td style="width:110px;"><span class="badge bg-secondary-lt">' + escapeHtml(e.category) + '</span></td>'
+      +   '<td class="text-secondary" style="width:110px;">' + escapeHtml(e.user || '') + '</td>'
+      +   '<td style="width:60px;"><span class="badge ' + lvlBadgeClass + '">' + escapeHtml(e.level) + '</span></td>'
+      +   '<td class="text-mono" style="font-size:12px;word-break:break-word;white-space:pre-wrap;">' + escapeHtml(e.line) + '</td>'
       + '</tr>';
   };
   const rowsHtml = rows.length === 0
-    ? '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px;">No log lines match these filters.</td></tr>'
+    ? '<tr><td colspan="5" class="text-center text-secondary py-4">No log lines match these filters.</td></tr>'
     : rows.map(rowHtml).join('');
 
-  const styles = ''
-    + '<style>'
-    +   '.log-form{display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin:0 0 12px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:10px;}'
-    +   '.log-form > div{display:flex;flex-direction:column;gap:4px;}'
-    +   '.log-form label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}'
-    +   '.log-form .inp, .log-form select{min-width:120px;}'
-    +   '.log-stats{font-size:12px;color:var(--muted);margin-bottom:8px;}'
-    +   '.log-table{width:100%;border-collapse:collapse;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;table-layout:fixed;}'
-    +   '.log-table th{text-align:left;padding:6px 8px;background:rgba(255,255,255,0.03);color:var(--muted);font-weight:500;border-bottom:1px solid var(--border);position:sticky;top:0;}'
-    +   '.log-table td{padding:5px 8px;vertical-align:top;border-bottom:1px solid rgba(255,255,255,0.04);word-break:break-word;white-space:pre-wrap;}'
-    +   '.log-table th.log-ts, .log-table td.log-ts{width:160px;color:var(--muted);}'
-    +   '.log-table th.log-cat, .log-table td.log-cat{width:110px;}'
-    +   '.log-table th.log-usr, .log-table td.log-usr{width:110px;color:var(--muted);}'
-    +   '.log-table th.log-lvl, .log-table td.log-lvl{width:50px;color:var(--muted);text-transform:uppercase;}'
-    +   '.log-table tr.log-warn td.log-lvl{color:#e0b020;}'
-    +   '.log-table tr.log-error{background:rgba(220,40,40,0.06);}'
-    +   '.log-table tr.log-error td.log-lvl{color:var(--accent2);font-weight:600;}'
-    +   '.cat-tag{display:inline-block;padding:1px 7px;border-radius:4px;background:rgba(255,255,255,0.06);font-size:11px;}'
-    +   '.tail-indicator{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);margin-right:6px;animation:tail-pulse 1.5s infinite;}'
-    +   '@keyframes tail-pulse{0%,100%{opacity:1;}50%{opacity:.3;}}'
-    + '</style>';
-
+  // Tail-mode auto-refresh JS — polls /admin/logs.json every 3s and replaces
+  // the tbody. Builds rows in the SAME shape as server-rendered ones above
+  // (Tabler badges + same column widths) so the live update is invisible.
   const tailJs = tail
-    ? '<script>(function(){function fmt(rows){if(!rows.length)return ' + JSON.stringify('<tr><td colspan="5" style="text-align:center;color:#888;padding:20px;">No log lines match these filters.</td></tr>') + ';return rows.map(function(e){var t=new Date(e.ts).toISOString().replace("T"," ").slice(0,19);var cls=e.level==="error"?"log-error":e.level==="warn"?"log-warn":"log-log";var esc=function(s){return String(s||"").replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"}[c];});};return "<tr class=\\""+cls+"\\">"+"<td class=\\"log-ts\\">"+esc(t)+"</td>"+"<td class=\\"log-cat\\"><span class=\\"cat-tag\\">"+esc(e.category)+"</span></td>"+"<td class=\\"log-usr\\">"+esc(e.user||"")+"</td>"+"<td class=\\"log-lvl\\">"+esc(e.level)+"</td>"+"<td class=\\"log-line\\">"+esc(e.line)+"</td>"+"</tr>";}).join("");}function poll(){fetch("/admin/logs.json"+location.search,{cache:"no-store"}).then(function(r){return r.json();}).then(function(d){var b=document.getElementById("log-rows");if(b)b.innerHTML=fmt(d.rows||[]);}).catch(function(){});}setInterval(poll,3000);})();</script>'
+    ? `<script>(function(){
+        function esc(s){return String(s||'').replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+        function badgeClass(lvl){return lvl==='error'?'bg-red-lt':lvl==='warn'?'bg-yellow-lt':'bg-secondary-lt';}
+        function fmt(rows){
+          if(!rows.length) return '<tr><td colspan="5" class="text-center text-secondary py-4">No log lines match these filters.</td></tr>';
+          return rows.map(function(e){
+            var t=new Date(e.ts).toISOString().replace('T',' ').slice(0,19);
+            return '<tr>'
+              + '<td class="text-secondary text-mono" style="width:160px;">'+esc(t)+'</td>'
+              + '<td style="width:110px;"><span class="badge bg-secondary-lt">'+esc(e.category)+'</span></td>'
+              + '<td class="text-secondary" style="width:110px;">'+esc(e.user||'')+'</td>'
+              + '<td style="width:60px;"><span class="badge '+badgeClass(e.level)+'">'+esc(e.level)+'</span></td>'
+              + '<td class="text-mono" style="font-size:12px;word-break:break-word;white-space:pre-wrap;">'+esc(e.line)+'</td>'
+              + '</tr>';
+          }).join('');
+        }
+        function poll(){
+          fetch('/admin/logs.json'+location.search,{cache:'no-store'})
+            .then(function(r){return r.json();})
+            .then(function(d){var b=document.getElementById('log-rows');if(b)b.innerHTML=fmt(d.rows||[]);})
+            .catch(function(){});
+        }
+        setInterval(poll, 3000);
+      })();</script>`
     : '';
 
   const summaryByCat = Object.entries(stats.byCategory || {})
@@ -1140,48 +1433,53 @@ function renderLogsPage(currentUser, q) {
     .map(([c, n]) => escapeHtml(c) + ':' + n)
     .join(' · ');
 
-  const body = styles
-    + '<p style="color:var(--muted);font-size:13px;margin:0 0 12px;">'
-    +   'Live server logs (in-memory ring buffer, last ' + stats.max + ' lines). '
-    +   'Logged in as <code>' + escapeHtml(currentUser.username) + '</code>.'
-    + '</p>'
-    + '<form class="log-form" method="GET" action="/admin/logs">'
-    +   '<div><label>Category</label><select class="inp" name="category">'
-    +     cats.map((c) => opt(c, category)).join('')
-    +   '</select></div>'
-    +   '<div><label>User</label><input class="inp" name="user" value="' + escapeHtml(userFilter) + '" placeholder="any" style="width:140px;"></div>'
-    +   '<div><label>Search</label><input class="inp" name="substring" value="' + escapeHtml(substring) + '" placeholder="text…" style="width:200px;"></div>'
-    +   '<div><label>Level</label><select class="inp" name="level">'
-    +     ['all','log','warn','error'].map((l) => opt(l, level)).join('')
-    +   '</select></div>'
-    +   '<div><label>Limit</label><select class="inp" name="limit">'
-    +     ['100','500','1000','2500','5000'].map((n) => opt(n, String(limit))).join('')
-    +   '</select></div>'
-    +   '<div><label>Tail</label><label style="display:flex;align-items:center;gap:6px;font-size:13px;height:38px;">'
-    +     '<input type="checkbox" name="tail" value="on"' + (tail ? ' checked' : '') + '> 3s refresh'
-    +   '</label></div>'
-    +   '<div><label>&nbsp;</label><button type="submit" class="btn-install" style="margin:0;padding:10px 18px;width:auto;">Apply</button></div>'
-    + '</form>'
-    + '<div class="log-stats">'
-    +   (tail ? '<span class="tail-indicator"></span>' : '')
+  const body = ''
+    + '<div class="page-header">'
+    +   '<div class="row align-items-center">'
+    +     '<div class="col">'
+    +       '<h2 class="page-title">Logs</h2>'
+    +       '<div class="text-secondary mt-1">Live server logs (in-memory ring buffer, last ' + stats.max + ' lines).</div>'
+    +     '</div>'
+    +   '</div>'
+    + '</div>'
+
+    // Filter form
+    + '<div class="card mb-3">'
+    +   '<div class="card-body">'
+    +     '<form class="row g-2 align-items-end" method="GET" action="/admin/logs">'
+    +       '<div class="col-md-2"><label class="form-label">Category</label><select class="form-select form-select-sm" name="category">' + cats.map((c) => opt(c, category)).join('') + '</select></div>'
+    +       '<div class="col-md-2"><label class="form-label">User</label><input class="form-control form-control-sm" name="user" value="' + escapeHtml(userFilter) + '" placeholder="any"></div>'
+    +       '<div class="col-md-3"><label class="form-label">Search</label><input class="form-control form-control-sm" name="substring" value="' + escapeHtml(substring) + '" placeholder="text…"></div>'
+    +       '<div class="col-md-1"><label class="form-label">Level</label><select class="form-select form-select-sm" name="level">' + ['all','log','warn','error'].map((l) => opt(l, level)).join('') + '</select></div>'
+    +       '<div class="col-md-1"><label class="form-label">Limit</label><select class="form-select form-select-sm" name="limit">' + ['100','500','1000','2500','5000'].map((n) => opt(n, String(limit))).join('') + '</select></div>'
+    +       '<div class="col-md-2"><label class="form-label">Tail</label><label class="form-check form-switch mt-1"><input class="form-check-input" type="checkbox" name="tail" value="on"' + (tail ? ' checked' : '') + '><span class="form-check-label">3s refresh</span></label></div>'
+    +       '<div class="col-md-1"><button type="submit" class="btn btn-primary btn-sm w-100">Apply</button></div>'
+    +     '</form>'
+    +   '</div>'
+    + '</div>'
+
+    // Stats line
+    + '<div class="text-secondary small mb-2">'
+    +   (tail ? '<span class="status-dot status-dot-animated bg-red me-1"></span>' : '')
     +   '<strong>' + stats.total + '</strong> / ' + stats.max + ' lines buffered &middot; '
     +   summaryByCat + ' &middot; '
     +   'errors: ' + (stats.byLevel.error || 0) + ' &middot; '
     +   'warns: ' + (stats.byLevel.warn || 0) + ' &middot; '
     +   'showing ' + rows.length
     + '</div>'
-    + '<table class="log-table">'
-    +   '<thead><tr><th class="log-ts">Time (UTC)</th><th class="log-cat">Cat</th><th class="log-usr">User</th><th class="log-lvl">Lvl</th><th class="log-line">Line</th></tr></thead>'
-    +   '<tbody id="log-rows">' + rowsHtml + '</tbody>'
-    + '</table>'
-    + tailJs
-    + '<div style="margin-top:24px;padding-top:18px;border-top:1px solid var(--border);">'
-    +   '<a href="/admin" style="color:var(--accent);text-decoration:none;font-weight:500;">← Back to admin</a>'
-    +   ' &nbsp;&middot;&nbsp; '
-    +   '<a href="/admin/health" style="color:var(--text);text-decoration:none;font-size:13px;">📊 Health</a>'
-    + '</div>';
 
-  return accountPage('Logs — SeriousSportSync', body, 'admin');
+    // Log table card
+    + '<div class="card">'
+    +   '<div class="table-responsive">'
+    +     '<table class="table table-vcenter card-table table-sm">'
+    +       '<thead><tr><th>Time (UTC)</th><th>Cat</th><th>User</th><th>Lvl</th><th>Line</th></tr></thead>'
+    +       '<tbody id="log-rows">' + rowsHtml + '</tbody>'
+    +     '</table>'
+    +   '</div>'
+    + '</div>'
+    + tailJs;
+
+  return tablerChrome.tablerPage('Logs', body, { user: currentUser, currentSection: 'logs' });
 }
 
 // 0.28.0/0.28.1: admin per-event power tool. Page state in URL —
@@ -1310,7 +1608,7 @@ function renderPowerToolPage(currentUser, q) {
       // Filter form — preserves event in query string, GET so it bookmarks.
       const filterForm = '<form method="GET" action="/admin/power-tool" class="pt-filters">'
         + '<input type="hidden" name="event" value="' + escapeHtml(ev.id) + '">'
-        + '<div><label>Indexer</label><select name="indexer" class="inp">'
+        + '<div><label>Indexer</label><select name="indexer" class="form-control">'
         +   ['all'].concat(evaluated.indexers).map((ix) =>
               '<option value="' + escapeHtml(ix) + '"' + (ix === indexer ? ' selected' : '') + '>' + escapeHtml(ix) + '</option>'
             ).join('')
@@ -1359,8 +1657,8 @@ function renderPowerToolPage(currentUser, q) {
         +   pagination
         +   '<div style="margin-top:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-top:12px;border-top:1px solid var(--border);">'
         +     '<span id="picked-count" style="color:var(--muted);font-size:12px;">0 selected</span>'
-        +     '<button type="submit" name="provider" value="tb" class="btn-install" style="margin:0;padding:9px 16px;width:auto;"' + (tbKeySet ? '' : ' disabled title="WARMER_TB_TOKEN not set in .env"') + '>🔥 Warm selected on TB</button>'
-        +     '<button type="submit" name="provider" value="pm" class="btn-install" style="margin:0;padding:9px 16px;width:auto;"' + (pmKeySet ? '' : ' disabled title="WARMER_PM_KEY not set in .env"') + '>🔥 Warm selected on PM</button>'
+        +     '<button type="submit" name="provider" value="tb" class="btn btn-primary w-100 mt-3" style="margin:0;padding:9px 16px;width:auto;"' + (tbKeySet ? '' : ' disabled title="WARMER_TB_TOKEN not set in .env"') + '>🔥 Warm selected on TB</button>'
+        +     '<button type="submit" name="provider" value="pm" class="btn btn-primary w-100 mt-3" style="margin:0;padding:9px 16px;width:auto;"' + (pmKeySet ? '' : ' disabled title="WARMER_PM_KEY not set in .env"') + '>🔥 Warm selected on PM</button>'
         +   '</div>'
         + '</form>'
         + '<div class="pt-row pt-sub" style="margin-top:10px;font-size:11px;">'
@@ -1433,10 +1731,10 @@ function renderPowerToolPage(currentUser, q) {
     + '<form class="pt-picker" method="GET" action="/admin/power-tool">'
     +   '<div style="display:flex;flex-direction:column;gap:4px;flex:1;">'
     +     '<label style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">Event (type to filter — ' + allEvents.length + ' available)</label>'
-    +     '<input class="inp" name="event" list="event-list" value="' + escapeHtml(eventId) + '" placeholder="e.g. ufc:2391889 or start typing a name" autocomplete="off">'
+    +     '<input class="form-control" name="event" list="event-list" value="' + escapeHtml(eventId) + '" placeholder="e.g. ufc:2391889 or start typing a name" autocomplete="off">'
     +     '<datalist id="event-list">' + datalistOpts + '</datalist>'
     +   '</div>'
-    +   '<button type="submit" class="btn-install" style="margin:0;padding:10px 20px;width:auto;">Select</button>'
+    +   '<button type="submit" class="btn btn-primary w-100 mt-3" style="margin:0;padding:10px 20px;width:auto;">Select</button>'
     + '</form>'
     + eventCard
     + candidatesBlock
@@ -1449,17 +1747,29 @@ function renderPowerToolPage(currentUser, q) {
     +   '<a href="/admin/logs" style="color:var(--text);text-decoration:none;font-size:13px;">📜 Logs</a>'
     + '</div>';
 
-  return accountPage('Power Tool — SeriousSportSync', body, 'admin');
+  // 0.37.0: pragmatic conversion — power-tool's existing inline <style>
+  // block keeps its bespoke layout intact via the legacy CSS variable aliases
+  // defined in lib/tabler-chrome.js. Page gets the new sidebar/topbar chrome
+  // without rewriting the 200+ lines of complex inner UI (event picker /
+  // search results table / warm pipeline). Full Tabler conversion of the
+  // inner content can land in 0.37.1 if desired.
+  return tablerChrome.tablerPage('Power Tool', body, { user: currentUser, currentSection: 'power-tool' });
 }
 
 // Render a credential input as a masked field with a Show/Hide toggle.
 // The toggle is wired by a small delegated listener in renderAccountPage.
+// 0.37.0: Tabler-styled secret field (label + input-group with toggle button).
+// Replaces the hand-rolled .lbl/.secret-row/.btn-reveal triplet.
 function secretField(label, name, value, placeholder) {
   return ''
-    + '<label class="lbl">' + label + '</label>'
-    + '<div class="secret-row">'
-    +   '<input class="inp mono" type="password" name="' + name + '" value="' + escapeHtml(value || '') + '" placeholder="' + escapeHtml(placeholder || '') + '" autocomplete="off">'
-    +   '<button type="button" class="btn-reveal">Show</button>'
+    + '<div class="mb-3">'
+    +   '<label class="form-label">' + escapeHtml(label) + '</label>'
+    +   '<div class="input-group input-group-flat">'
+    +     '<input class="form-control text-mono" type="password" name="' + escapeHtml(name) + '" value="' + escapeHtml(value || '') + '" placeholder="' + escapeHtml(placeholder || '') + '" autocomplete="off">'
+    +     '<span class="input-group-text">'
+    +       '<a href="#" class="link-secondary btn-reveal" tabindex="-1">Show</a>'
+    +     '</span>'
+    +   '</div>'
     + '</div>';
 }
 
@@ -1467,132 +1777,190 @@ function renderAccountPage(user, opts) {
   opts = opts || {};
   const cfg = user.config || {};
   const apiToken = user.apiToken || '';
-  // Install URL combines the request-derived origin (which honors
-  // X-Forwarded-Proto/Host from cloudflared/nginx) with the per-user path.
-  // opts.origin is computed by addon.js's publicOriginFromReq().
   const installPath = '/u/' + user.id + '/' + apiToken + '/manifest.json';
   const installUrl = (opts.origin || '') + installPath;
   const selected = new Set(Array.isArray(cfg.catalogs) ? cfg.catalogs : []);
   const selectAll = selected.size === 0;
-  const ac = cfg.autoCache || {};
 
-  // Catalog checkboxes per promotion.
-  const catBlocks = [];
+  // Per-promotion catalog tickboxes — grouped into Tabler list-group items.
+  let catGroupsHtml = '';
   for (const p of promotions.enabled) {
-    const items = p.catalogs.map(function (c) {
+    let items = '';
+    for (const c of p.catalogs) {
       const checked = (selectAll || selected.has(c.id)) ? ' checked' : '';
-      return '<label class="cat"><input type="checkbox" name="catalogs" value="'
-        + escapeHtml(c.id) + '"' + checked + '> ' + escapeHtml(c.name) + '</label>';
-    }).join('');
-    catBlocks.push('<div class="cat-group"><div class="cat-group-title">'
-      + escapeHtml(p.name) + '</div>' + items + '</div>');
+      items += ''
+        + '<label class="form-check">'
+        +   '<input class="form-check-input" type="checkbox" name="catalogs" value="' + escapeHtml(c.id) + '"' + checked + '>'
+        +   '<span class="form-check-label">' + escapeHtml(c.name) + '</span>'
+        + '</label>';
+    }
+    catGroupsHtml += ''
+      + '<div class="col-md-6 col-lg-4 mb-3">'
+      +   '<div class="card">'
+      +     '<div class="card-header">'
+      +       '<h3 class="card-title">' + escapeHtml(p.name) + '</h3>'
+      +     '</div>'
+      +     '<div class="card-body py-2">' + items + '</div>'
+      +   '</div>'
+      + '</div>';
   }
-  const catRowsHtml = catBlocks.join('');
 
+  // Flash banner (Tabler alert).
   let flashHtml = '';
   if (opts.flash) {
     let txt = '';
-    if (opts.flash === 'saved') txt = '✓ Settings saved.';
-    else if (opts.flash === 'token-regenerated') txt = '✓ API token regenerated. Old install URL no longer works.';
-    else txt = opts.flash;
-    flashHtml = '<div class="flash">' + escapeHtml(txt) + '</div>';
+    let cls = 'alert-success';
+    if (opts.flash === 'saved') txt = 'Settings saved.';
+    else if (opts.flash === 'token-regenerated') txt = 'API token regenerated. Old install URL no longer works.';
+    else { txt = opts.flash; cls = 'alert-warning'; }
+    flashHtml = '<div class="alert ' + cls + ' alert-dismissible" role="alert">'
+      + '<div>' + escapeHtml(txt) + '</div>'
+      + '<a class="btn-close" data-bs-dismiss="alert" aria-label="close"></a>'
+      + '</div>';
   }
 
-  const adminLinkHtml = (user.role === 'admin')
-    ? '<a href="/admin" class="header-link">Admin panel</a>'
-    : '';
+  const defaultMaxStreams = parseInt(process.env.STREAM_MAX_ROWS || '20', 10);
+
+  // Services tab — credentials for each provider.
+  const servicesTab = ''
+    + '<div class="card mb-3">'
+    +   '<div class="card-header"><h3 class="card-title">TorBox</h3></div>'
+    +   '<div class="card-body">'
+    +     '<p class="text-secondary small mb-3">Used by the addon to check which scraper results are already cached on your TorBox subscription, and to return playable URLs only for cached items. Your key never leaves this addon.</p>'
+    +     secretField('TorBox API key', 'torboxApiKey', cfg.torboxApiKey, 'paste your TorBox API key')
+    +   '</div>'
+    + '</div>'
+
+    + '<div class="card mb-3">'
+    +   '<div class="card-header"><h3 class="card-title">Easynews</h3></div>'
+    +   '<div class="card-body">'
+    +     '<p class="text-secondary small mb-3">Stream rows will play directly from members.easynews.com using your subscription. Your password is encrypted at rest and never appears in stream URLs returned to Stremio (auth is injected only at play-time via a signed redirect). Leave blank if you don\'t have an Easynews subscription.</p>'
+    +     '<div class="mb-3">'
+    +       '<label class="form-label" for="en-user">Easynews username</label>'
+    +       '<input class="form-control" type="text" id="en-user" name="easynewsUsername" value="' + escapeHtml(cfg.easynewsUsername || '') + '" placeholder="your Easynews username" autocomplete="off">'
+    +     '</div>'
+    +     secretField('Easynews password', 'easynewsPassword', cfg.easynewsPassword, 'your Easynews password')
+    +   '</div>'
+    + '</div>'
+
+    + '<div class="card mb-3">'
+    +   '<div class="card-header"><h3 class="card-title">Usenet Ultimate</h3></div>'
+    +   '<div class="card-body">'
+    +     '<p class="text-secondary small mb-3">Stream rows will play through your UU instance. Leave blank if you don\'t use UU.</p>'
+    +     '<div class="mb-3">'
+    +       '<label class="form-label" for="uu-url">UU manifest URL</label>'
+    +       '<input class="form-control text-mono" type="url" id="uu-url" name="uuManifestUrl" value="' + escapeHtml(cfg.uuManifestUrl || '') + '" placeholder="https://your-usenet-ultimate.elfhosted.com/stremio/&lt;config&gt;/manifest.json">'
+    +     '</div>'
+    +   '</div>'
+    + '</div>'
+
+    + '<div class="card mb-3">'
+    +   '<div class="card-header"><h3 class="card-title">Result count</h3></div>'
+    +   '<div class="card-body">'
+    +     '<p class="text-secondary small mb-3">Cap the number of stream rows shown per event. 0 = use server default (' + escapeHtml(String(defaultMaxStreams)) + '). Sorted by size (largest first), then by recency.</p>'
+    +     '<div class="mb-0">'
+    +       '<label class="form-label">Max streams (0 = default)</label>'
+    +       '<input class="form-control" type="number" name="maxStreams" min="0" max="50" value="' + escapeHtml(String(cfg.maxStreams || 0)) + '" style="max-width:140px;">'
+    +     '</div>'
+    +   '</div>'
+    + '</div>'
+
+    // 0.38.0: warm-to-cache toggle. Default ON so new users get the helpful
+    // 🔥 rows automatically; opt-out for users who prefer cached-only rows.
+    + '<div class="card mb-3">'
+    +   '<div class="card-header"><h3 class="card-title">Warm to TorBox</h3></div>'
+    +   '<div class="card-body">'
+    +     '<p class="text-secondary small mb-3">When a release isn\'t already cached on your TorBox, show a 🔥 row that submits it for caching when clicked. Plays a brief "added — check back in 2-5 min" placeholder; come back once it\'s cached. Turn off if you prefer to only see ready-to-play rows.</p>'
+    +     '<label class="form-check form-switch">'
+    +       '<input class="form-check-input" type="checkbox" name="showWarmRows" value="on"' + ((cfg.showWarmRows !== false) ? ' checked' : '') + '>'
+    +       '<span class="form-check-label">Show warm-to-cache rows for uncached releases</span>'
+    +     '</label>'
+    +   '</div>'
+    + '</div>';
+
+  // Catalogs tab — promotion-grouped tickboxes in a responsive grid.
+  const catalogsTab = ''
+    + '<div class="card mb-3">'
+    +   '<div class="card-body">'
+    +     '<p class="text-secondary small mb-3">Tick the catalogs you want to see in Stremio Discover. Unticked promotions are hidden from your install URL\'s manifest.</p>'
+    +     '<div class="row">' + catGroupsHtml + '</div>'
+    +   '</div>'
+    + '</div>';
+
+  // Manifest tab — install URL + API token + regenerate.
+  const manifestTab = ''
+    + '<div class="card mb-3">'
+    +   '<div class="card-header"><h3 class="card-title">Install URL</h3></div>'
+    +   '<div class="card-body">'
+    +     '<p class="text-secondary small mb-3">Use this URL to install the addon in Stremio. It is tied to your account and API token.</p>'
+    +     '<div class="input-group">'
+    +       '<input class="form-control text-mono" id="murl" value="' + escapeHtml(installUrl) + '" readonly>'
+    +       '<button class="btn btn-primary" type="button" id="copyUrlBtn">Copy</button>'
+    +     '</div>'
+    +   '</div>'
+    + '</div>'
+
+    + '<div class="card mb-3">'
+    +   '<div class="card-header"><h3 class="card-title">API token</h3></div>'
+    +   '<div class="card-body">'
+    +     '<p class="text-secondary small mb-3">If your install URL leaks, regenerate this token. Your existing Stremio install stops working immediately; you\'ll need to reinstall with the new URL.</p>'
+    +     '<div class="input-group mb-3">'
+    +       '<input class="form-control text-mono" value="' + escapeHtml(apiToken) + '" readonly>'
+    +     '</div>'
+    +     '<button class="btn btn-danger" type="submit" formaction="/account/regenerate-token" formnovalidate onclick="return confirm(\'Regenerate API token? Your existing Stremio install stops working immediately.\');">'
+    +       'Regenerate token'
+    +     '</button>'
+    +   '</div>'
+    + '</div>';
 
   const body = ''
-    + '<div class="user-header">'
-    +   '<div class="user-header-left"><span class="badge badge-' + escapeHtml(user.role) + '">'
-    +     escapeHtml(user.role) + '</span> <strong>' + escapeHtml(user.username) + '</strong></div>'
-    +   '<div class="user-header-right">' + adminLinkHtml
-    +     ' <a href="/logout" class="header-link">Logout</a></div>'
+    + '<div class="page-header d-print-none">'
+    +   '<div class="row align-items-center">'
+    +     '<div class="col">'
+    +       '<h2 class="page-title">Account</h2>'
+    +     '</div>'
+    +   '</div>'
     + '</div>'
     + flashHtml
-    + '<form method="POST" action="/account/save" class="tabs-form">'
-    +   '<div class="tabs">'
-    +     '<input type="radio" name="__tab" id="t-services" checked>'
-    +     '<input type="radio" name="__tab" id="t-catalogs">'
-    +     '<input type="radio" name="__tab" id="t-manifest">'
-    +     '<div class="tabstrip">'
-    +       '<label for="t-services">Services</label>'
-    +       '<label for="t-catalogs">Catalogs</label>'
-    +       '<label for="t-manifest">Manifest</label>'
-    +     '</div>'
-
-    +     '<div class="tab-panel" data-tab="services">'
-    +       '<h3 class="sec">TorBox</h3>'
-    +       '<p class="hint">Paste your TorBox API key. Used by the addon to check which scraper results are already cached on your TorBox subscription, and to return playable URLs only for cached items. Your key never leaves this addon.</p>'
-    +       secretField('TorBox API key', 'torboxApiKey', cfg.torboxApiKey, 'paste your TorBox API key')
-
-    +       '<h3 class="sec">Usenet Ultimate</h3>'
-    +       '<p class="hint">Paste a Usenet Ultimate manifest URL. Stream rows will play through your UU instance. Leave blank if you don\'t use UU.</p>'
-    +       '<label class="lbl" for="uu-url">UU manifest URL</label>'
-    +       '<input class="inp" type="url" id="uu-url" name="uuManifestUrl" value="'
-    +         escapeHtml(cfg.uuManifestUrl || '') + '" placeholder="https://your-usenet-ultimate.elfhosted.com/stremio/&lt;config&gt;/manifest.json">'
-
-    +       '<h3 class="sec">Result count</h3>'
-    +       '<p class="hint">Cap the number of stream rows shown per event. 0 = use server default ('
-    +         escapeHtml(String(parseInt(process.env.STREAM_MAX_ROWS || '20', 10))) + '). Sorted by size (largest first), then by recency.</p>'
-    +       '<label class="lbl">Max streams (0 = default)</label>'
-    +       '<input class="inp" type="number" name="maxStreams" min="0" max="50" value="'
-    +         escapeHtml(String(cfg.maxStreams || 0)) + '" style="max-width:120px;">'
-
-    // Debrid keys preserved as hidden inputs so existing values aren\'t wiped
-    // on save. The Usenet /stream handler ignores them; cleanup pass will
-    // strip both UI + schema in a follow-up release.
-    +       '<input type="hidden" name="rd" value="' + escapeHtml(cfg.rd || '') + '">'
-    +       '<input type="hidden" name="tb" value="' + escapeHtml(cfg.tb || '') + '">'
-    +       '<input type="hidden" name="pm" value="' + escapeHtml(cfg.pm || '') + '">'
-    +       '<input type="hidden" name="autoCacheRD" value="' + (ac.rd ? '1' : '') + '">'
-    +       '<input type="hidden" name="autoCacheTB" value="' + (ac.tb ? '1' : '') + '">'
-    +       '<input type="hidden" name="autoCachePM" value="' + (ac.pm ? '1' : '') + '">'
-    +     '</div>'
-
-    +     '<div class="tab-panel" data-tab="catalogs">'
-    +       '<h3 class="sec">Catalogs</h3>'
-    +       '<p class="hint">Tick the catalogs you want to see in Stremio Discover. Unticked promotions are hidden from your install URL\'s manifest.</p>'
-    +       '<div class="cats">' + catRowsHtml + '</div>'
-    +     '</div>'
-
-    +     '<div class="tab-panel" data-tab="manifest">'
-    +       '<h3 class="sec">Install URL</h3>'
-    +       '<p class="hint">Use this URL to install the addon in Stremio. It is tied to your account and API token.</p>'
-    +       '<div class="url-row"><code id="murl">' + escapeHtml(installUrl) + '</code>'
-    +         '<button class="btn-copy" type="button" id="copyUrlBtn">Copy</button></div>'
-    +       '<h3 class="sec">API token</h3>'
-    +       '<p class="hint">If your install URL leaks, regenerate this token. Your existing Stremio install stops working immediately; you\'ll need to reinstall with the new URL.</p>'
-    +       '<div class="url-row"><code style="word-break:break-all;">' + escapeHtml(apiToken) + '</code></div>'
-    +       '<button class="btn-danger" type="submit" formaction="/account/regenerate-token" formnovalidate onclick="return confirm(\'Regenerate API token? Your existing Stremio install stops working immediately.\');" style="margin-top:14px;">Regenerate token</button>'
-    +     '</div>'
+    + '<form method="POST" action="/account/save">'
+    +   '<ul class="nav nav-tabs" role="tablist">'
+    +     '<li class="nav-item"><a href="#tab-services" class="nav-link active" data-bs-toggle="tab" role="tab">Services</a></li>'
+    +     '<li class="nav-item"><a href="#tab-catalogs" class="nav-link" data-bs-toggle="tab" role="tab">Catalogs</a></li>'
+    +     '<li class="nav-item"><a href="#tab-manifest" class="nav-link" data-bs-toggle="tab" role="tab">Manifest</a></li>'
+    +   '</ul>'
+    +   '<div class="tab-content pt-3">'
+    +     '<div class="tab-pane fade show active" id="tab-services" role="tabpanel">' + servicesTab + '</div>'
+    +     '<div class="tab-pane fade" id="tab-catalogs" role="tabpanel">' + catalogsTab + '</div>'
+    +     '<div class="tab-pane fade" id="tab-manifest" role="tabpanel">' + manifestTab + '</div>'
     +   '</div>'
-
-    +   '<div class="form-actions">'
-    +     '<button class="btn-install" type="submit">Save settings</button>'
-    +     '<span class="form-actions-hint">Saves Services + Catalogs at the same time.</span>'
+    +   '<div class="d-flex align-items-center mt-3">'
+    +     '<button class="btn btn-primary" type="submit">Save settings</button>'
+    +     '<span class="text-secondary small ms-3">Saves Services + Catalogs at the same time.</span>'
     +   '</div>'
     + '</form>'
+
+    // Inline JS: copy install URL + toggle password reveal. Same logic as
+    // before, just rebound to Tabler's input-group markup.
     + '<script>'
     + '(function(){'
     +   'var btn = document.getElementById("copyUrlBtn"), code = document.getElementById("murl");'
-    +   'if (!btn || !code) return;'
-    +   'btn.addEventListener("click", function() {'
-    +     'var t = code.textContent;'
+    +   'if (btn && code) btn.addEventListener("click", function() {'
+    +     'var t = code.value;'
     +     'if (navigator.clipboard) { navigator.clipboard.writeText(t); }'
     +     'btn.textContent = "Copied!"; setTimeout(function(){ btn.textContent = "Copy"; }, 1800);'
     +   '});'
     + '})();'
     + 'document.addEventListener("click", function(e){'
-    +   'var b = e.target && e.target.closest ? e.target.closest(".btn-reveal") : null;'
-    +   'if (!b) return; e.preventDefault();'
-    +   'var i = b.parentNode.querySelector("input"); if (!i) return;'
+    +   'var a = e.target && e.target.closest ? e.target.closest(".btn-reveal") : null;'
+    +   'if (!a) return; e.preventDefault();'
+    +   'var grp = a.closest(".input-group"); if (!grp) return;'
+    +   'var i = grp.querySelector("input"); if (!i) return;'
     +   'var show = i.type === "password"; i.type = show ? "text" : "password";'
-    +   'b.textContent = show ? "Hide" : "Show";'
+    +   'a.textContent = show ? "Hide" : "Show";'
     + '});'
     + '</script>';
 
-  return accountPage('Account — SeriousSportSync', body);
+  return tablerChrome.tablerPage('Account', body, { user, currentSection: 'account' });
 }
 
 
@@ -1697,7 +2065,17 @@ function accountPage(title, bodyHtml, bodyClass) {
   ].join('');
 }
 
+// 0.37.0: authPage now delegates to the Tabler 'auth' layout (centered card).
+// All existing callers (login / invite / setup / sign-in errors) keep the
+// same (title, bodyHtml) signature; the body just goes inside the Tabler
+// card. The legacy CSS block below is preserved verbatim because the
+// other (yet-to-be-converted) admin pages still consume it via accountPage().
+// Once all admin pages move to tablerChrome the whole block can be deleted.
 function authPage(title, bodyHtml) {
+  return tablerChrome.tablerPage(title, bodyHtml, { layout: 'auth' });
+}
+
+function _legacyAuthPageUnused(title, bodyHtml) {
   return [
     '<!doctype html><html lang="en"><head><meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',

@@ -13,6 +13,16 @@ let onefc = null;
 try { onefc = require('../lib/sources/onefc'); } catch (e) { onefc = null; }
 let wikiList = null;
 try { wikiList = require('../lib/sources/wikipedia-list'); } catch (e) { wikiList = null; }
+// 0.38.0: football-data.org parallel source for custom promotions whose
+// source.type === 'football-data'. Lazy-required so installs that never use
+// it don't pay the require cost on cold start.
+let footballData = null;
+try { footballData = require('../lib/sources/football-data'); } catch (e) { footballData = null; }
+// 0.42.13: TMDB parallel source for TV-style sports shows (Match of the Day,
+// ITV highlights, boxing analysis shows) where football-data / TSDB don't
+// apply. Same lazy-require pattern as football-data.
+let tmdb = null;
+try { tmdb = require('../lib/sources/tmdb'); } catch (e) { tmdb = null; }
 
 // Generic asymmetric window. Promotions can override by exposing
 // .eventScope(ev) which returns true for events they want kept.
@@ -102,6 +112,40 @@ async function refreshPromotion(promotion, log) {
       eventStartIso,
       log,
     });
+  } else if (promotion.source.type === 'football-data') {
+    // 0.38.0: football-data.org parallel source for custom football promotions.
+    // 0.38.1: API key now sourced via settings.js (admin-saved /admin field,
+    // falls back to FOOTBALL_DATA_API_KEY env var).
+    if (!footballData) { log('  football-data module unavailable — skipping'); return { ok: true }; }
+    const settings = require('../lib/settings');
+    const fd = settings.getFootballData();
+    if (!fd.apiKey) {
+      log('  football-data: no API key configured (set on /admin or via FOOTBALL_DATA_API_KEY env) — skipping ' + promotion.id);
+      return { ok: true };
+    }
+    const seasons = activeSeasons();
+    log('  football-data competition: ' + promotion.source.competitionId + ' seasons: ' + seasons.join(', '));
+    raw = await footballData.fetchAll({
+      competitionId: promotion.source.competitionId,
+      seasons,
+      apiKey: fd.apiKey,
+      log,
+    });
+  } else if (promotion.source.type === 'tmdb') {
+    // 0.42.13: TMDB TV show. Fetches all episodes with air dates. Each becomes
+    // an event whose date drives DARKSPORT-style search title generation.
+    if (!tmdb) { log('  tmdb module unavailable - skipping'); return { ok: true }; }
+    const tk = (config && config.tmdb && config.tmdb.apiKey) || (process.env.TMDB_API_KEY || '');
+    if (!tk) {
+      log('  tmdb: no API key configured (set TMDB_API_KEY env) - skipping ' + promotion.id);
+      return { ok: true };
+    }
+    log('  tmdb tvId: ' + promotion.source.tvId);
+    raw = await tmdb.fetchAll({
+      tvId: promotion.source.tvId,
+      apiKey: tk,
+      log,
+    });
   } else {
     log('  unknown source type: ' + promotion.source.type);
     return { ok: false };
@@ -113,13 +157,25 @@ async function refreshPromotion(promotion, log) {
 async function runRefresh(options) {
   const opts = options || {};
   const log = opts.log || ((m) => console.log(m));
-  log('[refresh] starting multi-promotion refresh (default window: -' + config.eventWindowDaysBack + ' / +' + config.eventWindowDaysAhead + ' days)');
+
+  // 0.41.0 — optional per-promotion refresh. When `promotionId` is set:
+  //   1. Events belonging to OTHER promotions are preserved verbatim (no
+  //      pruning, no source-mismatch check). We're intentionally not
+  //      touching them.
+  //   2. Only the target promotion's source is fetched and normalised.
+  // Speeds up iteration when tweaking a single promotion's aliases/keywords/
+  // templates without paying the cost of refetching every source.
+  const targetPromotionId = opts.promotionId ? String(opts.promotionId).trim() : null;
+
+  const scopeLabel = targetPromotionId ? 'promotion "' + targetPromotionId + '"' : 'all promotions';
+  log('[refresh] starting refresh (' + scopeLabel + ', window: -' + config.eventWindowDaysBack + ' / +' + config.eventWindowDaysAhead + ' days)');
   const start = Date.now();
 
   const existing = store.loadFromDisk();
   const byId = new Map();
   let prunedExisting = 0;
   let prunedStaleSource = 0;
+  let preservedOther = 0;
   // Prune existing events: drop anything outside scope OR tagged with a
   // source.type that no longer matches the promotion's current source.
   //
@@ -135,6 +191,16 @@ async function runRefresh(options) {
   //     explicit tag is reliable.
   for (const ev of existing.events || []) {
     const p = promotions.getByEventId(ev.id);
+
+    // 0.41.0 — per-promotion refresh: keep every event that ISN'T ours,
+    // untouched. No prune, no source-mismatch check. Only the target
+    // promotion's events flow through the normal refresh logic below.
+    if (targetPromotionId && (!p || p.id !== targetPromotionId)) {
+      byId.set(ev.id, ev);
+      preservedOther++;
+      continue;
+    }
+
     const expectedSourceType = p && p.source && p.source.type;
     const cachedSourceType = ev.source && ev.source.type;
 
@@ -158,9 +224,22 @@ async function runRefresh(options) {
   }
   if (prunedStaleSource > 0) log('[refresh] pruned ' + prunedStaleSource + ' events from previous source(s)');
   if (prunedExisting > 0) log('[refresh] pruned ' + prunedExisting + ' existing events outside scope');
+  if (preservedOther > 0) log('[refresh] preserved ' + preservedOther + ' events from other promotions');
+
+  // 0.41.0 — filter the fetch loop to the target promotion (if any). Missing
+  // ID or disabled promotion is a soft-fail: we bail early rather than write
+  // out a store that could clobber other promotions' data with nothing.
+  let toFetch = promotions.enabled;
+  if (targetPromotionId) {
+    toFetch = promotions.enabled.filter((p) => p.id === targetPromotionId);
+    if (toFetch.length === 0) {
+      log('[refresh] no enabled promotion with id "' + targetPromotionId + '" — nothing to do');
+      return { ok: false, error: 'promotion "' + targetPromotionId + '" not found or not enabled', total: existing.events ? existing.events.length : 0 };
+    }
+  }
 
   let totalAdded = 0, totalUpdated = 0, totalSkipped = 0;
-  for (const p of promotions.enabled) {
+  for (const p of toFetch) {
     let raw;
     try {
       raw = await refreshPromotion(p, log);
@@ -175,6 +254,8 @@ async function runRefresh(options) {
     for (const r of raw) {
       let norm;
       if (p.source.type === 'thesportsdb') norm = transform.fromTsdb(r, p);
+      else if (p.source.type === 'football-data') norm = transform.fromFootballData(r, p);
+      else if (p.source.type === 'tmdb') norm = transform.fromTmdb(r, p);
       else if (p.source.type === 'wikipedia' || p.source.type === 'onefc' || p.source.type === 'wikipedia-list') {
         norm = transform.fromWiki(r, p);
       }

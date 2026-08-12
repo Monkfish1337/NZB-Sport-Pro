@@ -78,8 +78,14 @@ const positional = args.filter((a) => a !== '--q' && !args[qIdx + 1] || a !== ar
   }
   console.log('');
 
+  // 3b. Strip noise (vlogs, interviews, weigh-ins, etc).
+  const filtered = newsnab.filterSportsNoise(search.results, log);
+  console.log('  newsnab: kept ' + filtered.results.length + ' / dropped '
+    + filtered.dropped + ' noise items');
+  console.log('');
+
   // 4. Build UU stream rows (limit to top 5 so we don't spam the terminal).
-  const rows = uu.buildStreamRows(search.results.slice(0, 5), parsed, displayName);
+  const rows = uu.buildStreamRows(filtered.results.slice(0, 5), parsed, displayName);
 
   console.log('Top ' + rows.length + ' Usenet Ultimate stream rows');
   console.log('━'.repeat(78));

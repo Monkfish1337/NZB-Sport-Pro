@@ -1,0 +1,40 @@
+# 0.1.4 — keep the build context tiny.
+#
+# Without this file Docker bundles the entire folder (including runtime state,
+# previous node_modules, accidentally-dropped tarballs etc.) and ships it to
+# the daemon — context transfer scales linearly with size and can balloon to
+# multiple GB if anything large slips into the folder.
+
+# Runtime state — mounted as a volume in compose, never needs to be in the image.
+data/
+
+# Dependencies — installed inside the image during build.
+node_modules/
+
+# Build artifacts / deploy bundles — should never end up inside the image.
+*.tar.gz
+*.tgz
+*.zip
+
+# Version control + editor cruft.
+.git/
+.gitignore
+.github/
+.vscode/
+.idea/
+
+# Docs aren't needed at runtime.
+README.md
+LICENSE
+*.md
+
+# OS junk.
+.DS_Store
+Thumbs.db
+
+# Test / dev scratch files.
+*.test.js
+*.spec.js
+__tests__/
+coverage/
+.nyc_output/

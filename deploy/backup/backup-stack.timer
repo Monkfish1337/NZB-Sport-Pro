@@ -1,0 +1,14 @@
+[Unit]
+Description=daily stremio-stack backup
+Documentation=file:///mnt/storage/stremio-stack/scripts/backup-stack.sh
+
+[Timer]
+# Every day at 03:15 local time. Random 5-minute jitter to avoid herds.
+OnCalendar=*-*-* 03:15:00
+RandomizedDelaySec=300
+# Run immediately if the system was off at the scheduled time.
+Persistent=true
+Unit=backup-stack.service
+
+[Install]
+WantedBy=timers.target

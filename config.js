@@ -42,6 +42,27 @@ module.exports = {
     emptyRoundStopAfter: 5,
   },
 
+  // 0.38.0: football-data.org parallel source for custom promotions whose
+  // source.type === 'football-data'. Used to cover FIFA WC + EPL + Champions
+  // League + most major football leagues where TSDB's free-tier coverage is
+  // sparse. Free tier: 10 req/min, no payment. Get an API key at
+  // football-data.org/client/register and set FOOTBALL_DATA_API_KEY in your
+  // compose env. Empty key = football-data promotions skip refresh with a
+  // clear log warning.
+  footballData: {
+    apiKey: process.env.FOOTBALL_DATA_API_KEY || '',
+  },
+
+  // 0.42.13 — TMDB source. For TV-style sports shows (Match of the Day, ITV
+  // highlights, boxing analysis shows, etc.) where football-data / TSDB don't
+  // apply. Each show is identified by its numeric TMDB TV show ID; refresh
+  // fetches all episodes with air dates and treats each as an event whose
+  // date drives DARKSPORT-style search title generation. Free API key at
+  // https://developer.themoviedb.org.
+  tmdb: {
+    apiKey: process.env.TMDB_API_KEY || '',
+  },
+
   includeContenderSeries: false,
   dataFile: process.env.DATA_FILE || './data/events.json',
 
@@ -71,12 +92,35 @@ module.exports = {
   // (e.g. https://api.nzbgeek.info), api key is the per-account key from the
   // indexer dashboard. Categories default to TV-Sport (5080) + TV-Other
   // (5000) + Other (8000) — broad enough to catch most sports posts.
-  newsnab: {
-    url: process.env.NEWSNAB_URL || '',
-    apiKey: process.env.NEWSNAB_API_KEY || '',
-    categories: (process.env.NEWSNAB_CATEGORIES || '5000,5080,8000')
-      .split(',').map((s) => s.trim()).filter(Boolean),
-  },
+  newsnab: (() => {
+    // 0.42.7 — support multiple Newznab endpoints. NEWSNAB_URL and
+    // NEWSNAB_API_KEY may each be a comma-separated list; positions are
+    // paired (URL[0] ↔ KEY[0], URL[1] ↔ KEY[1], …). This lets you fan out
+    // to nzbgeek + usenet-crawler + drunkenslug + whatever else you subscribe
+    // to, since some indexers only carry certain content (e.g. current-
+    // season DARKSPORT releases show on usenet-crawler but lag on nzbgeek).
+    //
+    // Single-value form still works: `NEWSNAB_URL=https://api.nzbgeek.info`
+    // + `NEWSNAB_API_KEY=xxxx` behaves exactly as before.
+    const urlsRaw = String(process.env.NEWSNAB_URL || '').trim();
+    const keysRaw = String(process.env.NEWSNAB_API_KEY || '').trim();
+    const urls = urlsRaw.split(',').map((s) => s.trim()).filter(Boolean);
+    const keys = keysRaw.split(',').map((s) => s.trim()).filter(Boolean);
+    const endpoints = [];
+    for (let i = 0; i < urls.length; i++) {
+      if (!urls[i] || !keys[i]) continue;
+      endpoints.push({ url: urls[i], apiKey: keys[i] });
+    }
+    return {
+      // Back-compat: url + apiKey point to the first configured endpoint so
+      // any callsite that hasn't been migrated to `endpoints` still works.
+      url: (endpoints[0] && endpoints[0].url) || '',
+      apiKey: (endpoints[0] && endpoints[0].apiKey) || '',
+      endpoints,
+      categories: (process.env.NEWSNAB_CATEGORIES || '5000,5080,8000')
+        .split(',').map((s) => s.trim()).filter(Boolean),
+    };
+  })(),
   // Debrid providers — any combination of these can be configured.
   // streams.js queries each configured provider in series for every Prowlarr
   // candidate and returns one stream per provider per cache hit.
@@ -164,25 +208,17 @@ module.exports = {
     ttlDays: parseFloat(process.env.PM_DENYLIST_TTL_DAYS || '30'),
     softTtlHours: parseFloat(process.env.PM_SOFT_DENYLIST_HOURS || '24'),
   },
+
   // Positive resolve cache (0.24.0). Records every successful play-time
   // resolve as (hash, provider) and surfaces them as authoritative-cached on
-  // the next /stream request. Particularly valuable for RD where the API
-  // doesn't permit non-destructive cache checks. See lib/positive-cache.js.
   positiveCache: {
     file: process.env.POSITIVE_CACHE_FILE || './data/positive-cache.json',
     ttlDays: parseFloat(process.env.POSITIVE_CACHE_TTL_DAYS || '7'),
   },
 
-  // Warmer-time cache verification (0.23.1). When the proactive warmer runs
-  // every STREAM_CACHE_REFRESH_HOURS, it batches every candidate hash against
-  // TB/PM's non-destructive cache-check APIs and persists the result into the
-  // candidate cache. streams.js then advertises TB/PM rows only when verified
-  // cached, drastically reducing dead clicks. Both APIs are non-destructive
-  // and quota-free — these are lookups, not adds. RD has no equivalent API
-  // (instantAvailability was removed in 2024) so RD remains optimistic +
-  // denylist. Provide either provider's key here to enable that provider's
-  // verification; both empty disables warmer verification (falls back to
-  // optimistic + denylist for everyone).
+  // Warmer-time cache verification (0.23.1). Provide either provider's key
+  // here to enable that provider's verification; both empty disables warmer
+  // verification (falls back to optimistic + denylist for everyone).
   warmer: {
     tbToken:  process.env.WARMER_TB_TOKEN || '',
     pmApiKey: process.env.WARMER_PM_KEY   || '',

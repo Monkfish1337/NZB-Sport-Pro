@@ -1,0 +1,26 @@
+# Standalone compose for SeriousSportSync Scraper.
+# Lift this service block into your stremio-stack/docker-compose.yml if you
+# want the scraper to share the same network as the metadata addon, Prowlarr,
+# Zilean, gluetun, etc.
+
+services:
+  serioussportsync-scraper:
+    container_name: serioussportsync-scraper
+    build: .
+    # If you'd rather pull an image you've already built + pushed somewhere:
+    # image: <your-registry>/serioussportsync-scraper:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8080
+      SCRAPER_AUTH_TOKEN: ${SCRAPER_AUTH_TOKEN}
+      SOURCE_TIMEOUT_MS: ${SOURCE_TIMEOUT_MS:-10000}
+      SCRAPE_BUDGET_MS: ${SCRAPE_BUDGET_MS:-25000}
+      LOG_BUFFER_MAX: ${LOG_BUFFER_MAX:-4000}
+      HISTORY_MAX: ${HISTORY_MAX:-200}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,prowlarr,zilean}
+    volumes:
+      - ./data:/app/data
