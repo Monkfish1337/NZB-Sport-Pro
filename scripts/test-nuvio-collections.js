@@ -82,11 +82,23 @@ assert.deepStrictEqual(
 
 const defaultManifest = buildManifest({ user: { config: {} } });
 assert.ok(defaultManifest.catalogs.length > 0, 'existing users keep home catalog rows by default');
+assert.ok(
+  defaultManifest.catalogs.every((catalog) => catalog.showInHome === true),
+  'default manifest marks every registered catalog for Home',
+);
 
 const collectionsOnlyManifest = buildManifest({
   user: { config: { showCatalogsOnHome: false } },
 });
-assert.deepStrictEqual(collectionsOnlyManifest.catalogs, [], 'collections-only mode hides home catalog rows');
+assert.strictEqual(
+  collectionsOnlyManifest.catalogs.length,
+  defaultManifest.catalogs.length,
+  'collections-only mode keeps every catalog registered for collection lookup',
+);
+assert.ok(
+  collectionsOnlyManifest.catalogs.every((catalog) => catalog.showInHome === false),
+  'collections-only mode marks every registered catalog as hidden from Home',
+);
 assert.ok(
   collectionsOnlyManifest.resources.some((resource) => resource.name === 'catalog'),
   'collections-only mode retains the catalog resource used by collection sources',

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.44.3
+
+### Collections-only manifest fix
+
+- Kept collection-backed catalogs registered in the manifest when home rows
+  are disabled, and now mark them with Nuvio's `showInHome: false` hint.
+- Fixed imported collection folders becoming empty in collections-only mode.
+
 ## 0.44.2
 
 ### Catalog home-row visibility

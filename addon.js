@@ -2044,7 +2044,7 @@ function renderAccountPage(user, opts) {
     +       '<input class="form-check-input" type="checkbox" name="showCatalogsOnHome" value="on"' + ((cfg.showCatalogsOnHome !== false) ? ' checked' : '') + '>'
     +       '<span class="form-check-label">Show enabled catalogs as Nuvio/Stremio home rows</span>'
     +     '</label>'
-    +     '<p class="text-secondary small mb-1">Turn this off for a collections-only layout. The selected catalogs remain available inside an imported SeriousSportSync collection, but no individual catalog rows are advertised on the home screen.</p>'
+    +     '<p class="text-secondary small mb-1">Turn this off for a collections-only layout. The selected catalogs remain registered for an imported SeriousSportSync collection but are marked as hidden from the home screen.</p>'
     +     '<p class="text-secondary small mb-1">Tick the catalogs to include. Unticked catalogs are excluded from both the generated collection and, when home rows are enabled, your install URL\'s manifest.</p>'
     +     '<p class="text-secondary small mb-3">Drag the handles to reorder promotion blocks or catalogs within a promotion. This order is published directly in your manifest for Nuvio and Stremio.</p>'
     +     '<input type="hidden" name="promotionOrder" id="promotion-order" value="' + escapeHtml(orderedPromotions.map((p) => p.id).join(',')) + '">'
