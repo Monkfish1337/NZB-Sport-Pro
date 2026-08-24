@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.43.9
+
+### Catalog ordering UI fix
+
+- Changed promotion groups from a three-column grid to one top-down sequence
+  matching the order shown by Nuvio.
+- Replaced unreliable native button dragging with direct mouse, touch, and pen
+  pointer movement so grabbing a handle moves its promotion or catalog row.
+
 ## 0.43.8
 
 ### Per-user catalog ordering
