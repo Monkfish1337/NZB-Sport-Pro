@@ -1921,6 +1921,7 @@ function renderAccountPage(user, opts) {
   const apiToken = user.apiToken || '';
   const installPath = '/u/' + user.id + '/' + apiToken + '/manifest.json';
   const installUrl = (opts.origin || '') + installPath;
+  const nuvioJson = JSON.stringify(buildNuvioCollections({ user, origin: opts.origin }), null, 2);
   const selected = new Set(Array.isArray(cfg.catalogs) ? cfg.catalogs : []);
   const selectAll = selected.size === 0;
   const orderedPromotions = orderByIds(promotions.enabled, cfg.promotionOrder, (p) => p.id);
@@ -2042,9 +2043,9 @@ function renderAccountPage(user, opts) {
     +   '<div class="card-body">'
     +     '<label class="form-check form-switch mb-3">'
     +       '<input class="form-check-input" type="checkbox" name="showCatalogsOnHome" value="on"' + ((cfg.showCatalogsOnHome !== false) ? ' checked' : '') + '>'
-    +       '<span class="form-check-label">Show enabled catalogs as Nuvio/Stremio home rows</span>'
+    +       '<span class="form-check-label">Ask compatible Nuvio clients to show enabled catalogs as home rows</span>'
     +     '</label>'
-    +     '<p class="text-secondary small mb-1">Turn this off for a collections-only layout. The selected catalogs remain registered for an imported SeriousSportSync collection but are marked as hidden from the home screen.</p>'
+    +     '<p class="text-secondary small mb-1">Turning this off keeps collection sources registered while sending Nuvio\'s <code>showInHome: false</code> hint and Desktop-compatible hidden-catalog metadata. You may need to refresh or reinstall the addon for Nuvio to reload its manifest.</p>'
     +     '<p class="text-secondary small mb-1">Tick the catalogs to include. Unticked catalogs are excluded from both the generated collection and, when home rows are enabled, your install URL\'s manifest.</p>'
     +     '<p class="text-secondary small mb-3">Drag the handles to reorder promotion blocks or catalogs within a promotion. This order is published directly in your manifest for Nuvio and Stremio.</p>'
     +     '<input type="hidden" name="promotionOrder" id="promotion-order" value="' + escapeHtml(orderedPromotions.map((p) => p.id).join(',')) + '">'
@@ -2075,6 +2076,7 @@ function renderAccountPage(user, opts) {
     +       '<button class="btn btn-outline-primary" type="button" id="copyNuvioJsonBtn">Copy JSON</button>'
     +       '<span class="text-secondary small" id="copyNuvioJsonStatus" aria-live="polite"></span>'
     +     '</div>'
+    +     '<textarea id="nuvioJsonPayload" class="d-none" tabindex="-1" aria-hidden="true" readonly>' + escapeHtml(nuvioJson) + '</textarea>'
     +   '</div>'
     + '</div>'
 
@@ -2129,8 +2131,11 @@ function renderAccountPage(user, opts) {
     +   '});'
     + '})();'
     + '(function(){'
-    +   'var btn=document.getElementById("copyNuvioJsonBtn"),status=document.getElementById("copyNuvioJsonStatus");if(!btn)return;'
-    +   'btn.addEventListener("click",function(){btn.disabled=true;if(status)status.textContent="Preparing…";fetch("/account/nuvio-collections.json",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.text();}).then(function(json){if(!navigator.clipboard||!navigator.clipboard.writeText)throw new Error("Clipboard unavailable — use Download JSON");return navigator.clipboard.writeText(json);}).then(function(){if(status)status.textContent="Copied — paste into Nuvio Collections import.";}).catch(function(err){if(status)status.textContent=err.message;}).finally(function(){btn.disabled=false;});});'
+    +   'var btn=document.getElementById("copyNuvioJsonBtn"),status=document.getElementById("copyNuvioJsonStatus"),payload=document.getElementById("nuvioJsonPayload");if(!btn||!payload)return;'
+    +   'function legacyCopy(text){var area=document.createElement("textarea");area.value=text;area.setAttribute("readonly","");area.style.position="fixed";area.style.left="0";area.style.top="0";area.style.width="2px";area.style.height="2px";area.style.opacity=".01";document.body.appendChild(area);area.focus();area.select();area.setSelectionRange(0,area.value.length);var ok=false;try{ok=document.execCommand("copy");}finally{document.body.removeChild(area);}if(!ok)throw new Error("Browser blocked copying — use Download JSON");}'
+    +   'function done(){if(status)status.textContent="Copied — paste into Nuvio Collections import.";btn.disabled=false;}'
+    +   'function failed(err){try{legacyCopy(payload.value);done();}catch(_){if(status)status.textContent=(err&&err.message)||"Browser blocked copying — use Download JSON";btn.disabled=false;}}'
+    +   'btn.addEventListener("click",function(){btn.disabled=true;if(status)status.textContent="Copying…";var text=payload.value;if(navigator.clipboard&&navigator.clipboard.writeText&&window.isSecureContext){navigator.clipboard.writeText(text).then(done).catch(failed);}else{try{legacyCopy(text);done();}catch(err){failed(err);}}});'
     + '})();'
     + 'document.addEventListener("click", function(e){'
     +   'var a = e.target && e.target.closest ? e.target.closest(".btn-reveal") : null;'

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.44.4
+
+### Collection copy compatibility
+
+- Made Copy JSON work on plain-HTTP account pages and older browsers by
+  embedding the generated payload and falling back to selection-based copy.
+- Added a Nuvio Desktop-compatible collections-only manifest mode alongside
+  the `showInHome` hint, while keeping every collection source resolvable.
+
 ## 0.44.3
 
 ### Collections-only manifest fix

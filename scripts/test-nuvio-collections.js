@@ -86,6 +86,10 @@ assert.ok(
   defaultManifest.catalogs.every((catalog) => catalog.showInHome === true),
   'default manifest marks every registered catalog for Home',
 );
+assert.ok(
+  defaultManifest.catalogs.every((catalog) => catalog.extra.every((extra) => !extra.isRequired)),
+  'default manifest keeps every catalog eligible for Nuvio Desktop Home',
+);
 
 const collectionsOnlyManifest = buildManifest({
   user: { config: { showCatalogsOnHome: false } },
@@ -99,9 +103,26 @@ assert.ok(
   collectionsOnlyManifest.catalogs.every((catalog) => catalog.showInHome === false),
   'collections-only mode marks every registered catalog as hidden from Home',
 );
+assert.deepStrictEqual(
+  collectionsOnlyManifest.catalogs.filter(
+    (catalog) => catalog.extra.every((extra) => !extra.isRequired),
+  ),
+  [],
+  'collections-only mode excludes every catalog under Nuvio Desktop Home filtering',
+);
 assert.ok(
   collectionsOnlyManifest.resources.some((resource) => resource.name === 'catalog'),
   'collections-only mode retains the catalog resource used by collection sources',
 );
+for (const folder of personalised[0].folders) {
+  for (const source of folder.catalogSources) {
+    assert.ok(
+      collectionsOnlyManifest.catalogs.some(
+        (catalog) => catalog.id === source.catalogId && catalog.type === source.type,
+      ),
+      'Desktop-hidden catalog remains declared for collection lookup: ' + source.catalogId,
+    );
+  }
+}
 
 console.log('OK — Nuvio collection schema, visibility, filtering, ordering, and stable IDs verified.');
