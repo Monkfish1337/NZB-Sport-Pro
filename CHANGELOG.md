@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.45.2
+
+### Manchester United UU search latency
+
+- Prioritised football scene-style `competition + date + teams` searches for
+  Manchester United fixtures.
+- Reduced Manchester United's UU direct-search fan-out from twelve parallel
+  queries to four precise variants to avoid local index-manager timeouts.
+
 ## 0.45.1
 
 ### New-catalog account migration

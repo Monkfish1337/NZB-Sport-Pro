@@ -51,6 +51,12 @@ assert.ok(
   'generates the observed competition/date/team release order',
 );
 assert.strictEqual(
+  promo.searchTitles(event)[0],
+  'EPL 2026 08 22 Hull City vs Manchester United',
+  'prioritises the most precise football scene query for bounded providers',
+);
+assert.strictEqual(promo.uuMaxQueries, 4, 'limits UU fan-out for team fixtures');
+assert.strictEqual(
   promo.includeEvent({ name: 'Hull City vs Manchester City' }),
   false,
   'rejects defensive non-United fixtures',
