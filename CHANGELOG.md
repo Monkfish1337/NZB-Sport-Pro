@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.45.5
+
+### TorBox Unified discovery probe
+
+- Added a read-only account diagnostic for TorBox Voyager torrent and Usenet
+  searches with cache, ownership, and the user's configured BYOI sources.
+- Sanitised the diagnostic response so API keys and full NZB/download URLs are
+  never returned to the browser or written to the report.
+- Kept the existing companion, UU, and playback pipelines unchanged while the
+  current TorBox Search API contract is verified against real sports queries.
+
 ## 0.45.4
 
 ### Prowlarr torrent hash recovery

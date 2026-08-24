@@ -28,6 +28,7 @@ const tablerChrome = require('./lib/tabler-chrome');
 const { cleanOrder, orderByIds } = require('./lib/catalog-order');
 const { effectiveCatalogSelection, CURRENT_DEFAULTS_VERSION } = require('./lib/catalog-selection');
 const { buildNuvioCollections } = require('./lib/nuvio-collections');
+const torboxVoyager = require('./lib/sources/torbox-voyager');
 const APP_VERSION = require('./package.json').version || '?';
 
 
@@ -332,6 +333,23 @@ function createApp() {
       res.redirect('/account?flash=saved');
     } catch (err) {
       res.redirect('/account?flash=' + encodeURIComponent('Save failed: ' + err.message));
+    }
+  });
+
+  // Read-only TorBox Unified diagnostic. This does not add a torrent/NZB or
+  // alter the user's TorBox account; it only proves current Voyager and BYOI
+  // search access using the API key already encrypted in SSS.
+  app.post('/account/torbox-unified-probe', requireLogin, async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const torboxKey = String((req.user.config && req.user.config.torboxApiKey) || '').trim();
+    if (!torboxKey) return res.status(400).json({ ok: false, error: 'Save a TorBox API key first.' });
+    const query = String((req.body && req.body.query) || '').trim().slice(0, 200);
+    if (!query) return res.status(400).json({ ok: false, error: 'Enter a search query.' });
+    try {
+      const report = await torboxVoyager.probe(query, torboxKey, { resultLimit: 10 });
+      return res.json({ ok: report.searches.some((item) => item.ok), report });
+    } catch (err) {
+      return res.status(502).json({ ok: false, error: err.message });
     }
   });
 
@@ -1981,6 +1999,13 @@ function renderAccountPage(user, opts) {
     +   '<div class="card-body">'
     +     '<p class="text-secondary small mb-3">Used by the addon to check which scraper results are already cached on your TorBox subscription, and to return playable URLs only for cached items. Your key never leaves this addon.</p>'
     +     secretField('TorBox API key', 'torboxApiKey', cfg.torboxApiKey, 'paste your TorBox API key')
+    +     '<hr class="my-3">'
+    +     '<p class="text-secondary small mb-2"><strong>TorBox Unified diagnostic</strong> — read-only test of Voyager torrent, Usenet, cache, ownership, and your TorBox BYOI sources. This does not add anything to your account.</p>'
+    +     '<div class="input-group mb-2">'
+    +       '<input class="form-control text-mono" type="text" id="torbox-unified-query" value="EPL 2026 08 22 Hull City Vs Manchester United" maxlength="200">'
+    +       '<button class="btn btn-outline-primary" type="button" id="torbox-unified-probe">Test unified search</button>'
+    +     '</div>'
+    +     '<pre class="bg-dark text-light rounded p-3 mb-0 text-wrap" id="torbox-unified-output" style="display:none;max-height:420px;overflow:auto;font-size:12px;"></pre>'
     +   '</div>'
     + '</div>'
 
@@ -2125,6 +2150,10 @@ function renderAccountPage(user, opts) {
     // Inline JS: copy install URL + toggle password reveal. Same logic as
     // before, just rebound to Tabler's input-group markup.
     + '<script>'
+    + '(function(){'
+    +   'var btn=document.getElementById("torbox-unified-probe"),input=document.getElementById("torbox-unified-query"),out=document.getElementById("torbox-unified-output");if(!btn||!input||!out)return;'
+    +   'btn.addEventListener("click",async function(){btn.disabled=true;out.style.display="block";out.textContent="Searching TorBox Voyager and BYOI…";try{var body=new URLSearchParams({query:input.value});var response=await fetch("/account/torbox-unified-probe",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:body.toString()});var payload=await response.json();out.textContent=JSON.stringify(payload,null,2);}catch(err){out.textContent="Probe failed: "+err.message;}finally{btn.disabled=false;}});'
+    + '})();'
     + '(function(){'
     +   'var btn = document.getElementById("copyUrlBtn"), code = document.getElementById("murl");'
     +   'if (btn && code) btn.addEventListener("click", function() {'
