@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.43.3
+
+### Match of the Day catalog
+
+- Added one combined Match of the Day catalog backed by the TMDB entries for
+  Match of the Day and Match of the Day 2.
+- Normalised both shows to `Match of the Day DD MM YYYY` for catalog display,
+  indexer searches, and date-strict stream matching.
+- Added show-aware TMDB episode IDs so episodes from the two series cannot
+  overwrite one another when season and episode numbers coincide.
 
 ### Provider-owned Usenet Ultimate discovery
 

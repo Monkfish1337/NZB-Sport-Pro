@@ -141,12 +141,18 @@ async function refreshPromotion(promotion, log) {
       log('  tmdb: no API key configured (set TMDB_API_KEY env) - skipping ' + promotion.id);
       return { ok: true };
     }
-    log('  tmdb tvId: ' + promotion.source.tvId);
-    raw = await tmdb.fetchAll({
-      tvId: promotion.source.tvId,
-      apiKey: tk,
-      log,
-    });
+    const tvIds = Array.isArray(promotion.source.tvIds) && promotion.source.tvIds.length
+      ? promotion.source.tvIds
+      : [promotion.source.tvId];
+    for (const tvId of tvIds) {
+      log('  tmdb tvId: ' + tvId);
+      const episodes = await tmdb.fetchAll({
+        tvId,
+        apiKey: tk,
+        log,
+      });
+      raw.push(...episodes);
+    }
   } else {
     log('  unknown source type: ' + promotion.source.type);
     return { ok: false };
