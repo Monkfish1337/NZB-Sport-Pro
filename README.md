@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Monkfish1337/Serioussportsync/releases"><img src="https://img.shields.io/badge/version-0.43.7-blue.svg" alt="Version 0.43.7"></a>
+  <a href="https://github.com/Monkfish1337/Serioussportsync/releases"><img src="https://img.shields.io/badge/version-0.43.8-blue.svg" alt="Version 0.43.8"></a>
   <a href="https://github.com/Monkfish1337/Serioussportsync/actions/workflows/ci.yml"><img src="https://github.com/Monkfish1337/Serioussportsync/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/Monkfish1337/Serioussportsync/pkgs/container/serioussportsync"><img src="https://img.shields.io/badge/GHCR-container-2496ED?logo=docker&logoColor=white" alt="Container image"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT license"></a>
@@ -28,7 +28,7 @@ user-supplied, and remains under the operator's control.
 - Cover sports that general movie and television metadata providers handle poorly.
 - Search each event using promotion-aware names, dates, rounds, sessions, and matchups.
 - Reject interviews, countdown shows, wrong years, wrong rounds, and unrelated releases.
-- Give every account its own private install URL, catalogs, and playback credentials.
+- Give every account its own private install URL, drag-ordered catalogs, and playback credentials.
 - Add simple TSDB-backed sports and tune matching rules from the admin interface.
 - Deploy and update with Docker Compose while preserving state in a named volume.
 

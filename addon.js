@@ -25,6 +25,7 @@ const powerTool = require('./lib/power-tool');
 // below remains for any unconverted pages and is removed once all renders
 // use tablerChrome.tablerPage().
 const tablerChrome = require('./lib/tabler-chrome');
+const { cleanOrder, orderByIds } = require('./lib/catalog-order');
 const APP_VERSION = require('./package.json').version || '?';
 
 
@@ -280,7 +281,11 @@ function createApp() {
     // fields with the same name; express.urlencoded returns string or array.
     const cats = Array.isArray(b.catalogs) ? b.catalogs : (b.catalogs ? [b.catalogs] : []);
     const allCatalogIds = new Set();
-    for (const p of promotions.enabled) for (const c of p.catalogs) allCatalogIds.add(c.id);
+    const allPromotionIds = new Set();
+    for (const p of promotions.enabled) {
+      allPromotionIds.add(p.id);
+      for (const c of p.catalogs) allCatalogIds.add(c.id);
+    }
     const cleanCats = cats.filter((c) => allCatalogIds.has(c));
     // Storage convention: if user picked everything, store [] which downstream
     // interprets as "all enabled catalogs" — keeps the file small + lets new
@@ -303,6 +308,8 @@ function createApp() {
         easynewsUsername: String(b.easynewsUsername || '').trim(),
         easynewsPassword: String(b.easynewsPassword || ''),
         catalogs: finalCats,
+        promotionOrder: cleanOrder(b.promotionOrder, allPromotionIds),
+        catalogOrder: cleanOrder(b.catalogOrder, allCatalogIds),
         maxStreams,
         // 0.38.0: warm-to-cache pseudo-streams toggle (default true).
         showWarmRows: b.showWarmRows === 'on' || b.showWarmRows === '1' || b.showWarmRows === 'true',
@@ -1903,26 +1910,33 @@ function renderAccountPage(user, opts) {
   const installUrl = (opts.origin || '') + installPath;
   const selected = new Set(Array.isArray(cfg.catalogs) ? cfg.catalogs : []);
   const selectAll = selected.size === 0;
+  const orderedPromotions = orderByIds(promotions.enabled, cfg.promotionOrder, (p) => p.id);
 
-  // Per-promotion catalog tickboxes — grouped into Tabler list-group items.
+  // Per-promotion catalog tickboxes. Both levels follow the user's saved
+  // manifest order; registry additions that are not saved yet append safely.
   let catGroupsHtml = '';
-  for (const p of promotions.enabled) {
+  for (const p of orderedPromotions) {
     let items = '';
-    for (const c of p.catalogs) {
+    const orderedCatalogs = orderByIds(p.catalogs, cfg.catalogOrder, (c) => c.id);
+    for (const c of orderedCatalogs) {
       const checked = (selectAll || selected.has(c.id)) ? ' checked' : '';
       items += ''
-        + '<label class="form-check">'
-        +   '<input class="form-check-input" type="checkbox" name="catalogs" value="' + escapeHtml(c.id) + '"' + checked + '>'
-        +   '<span class="form-check-label">' + escapeHtml(c.name) + '</span>'
-        + '</label>';
+        + '<div class="catalog-sort-item d-flex align-items-center gap-2" data-catalog-id="' + escapeHtml(c.id) + '">'
+        +   '<button class="btn btn-sm btn-ghost-secondary catalog-drag-handle" type="button" draggable="true" title="Drag to reorder catalog" aria-label="Reorder ' + escapeHtml(c.name) + '">&#8942;&#8942;</button>'
+        +   '<label class="form-check flex-fill mb-0">'
+        +     '<input class="form-check-input" type="checkbox" name="catalogs" value="' + escapeHtml(c.id) + '"' + checked + '>'
+        +     '<span class="form-check-label">' + escapeHtml(c.name) + '</span>'
+        +   '</label>'
+        + '</div>';
     }
     catGroupsHtml += ''
-      + '<div class="col-md-6 col-lg-4 mb-3">'
-      +   '<div class="card">'
-      +     '<div class="card-header">'
+      + '<div class="catalog-sort-group col-md-6 col-lg-4 mb-3" data-promotion-id="' + escapeHtml(p.id) + '">'
+      +   '<div class="card h-100">'
+      +     '<div class="card-header d-flex align-items-center">'
       +       '<h3 class="card-title">' + escapeHtml(p.name) + '</h3>'
+      +       '<button class="btn btn-icon btn-ghost-secondary promotion-drag-handle ms-auto" type="button" draggable="true" title="Drag to reorder promotion" aria-label="Reorder ' + escapeHtml(p.name) + '">&#8942;&#8942;</button>'
       +     '</div>'
-      +     '<div class="card-body py-2">' + items + '</div>'
+      +     '<div class="card-body py-2 catalog-sort-items">' + items + '</div>'
       +   '</div>'
       + '</div>';
   }
@@ -2002,10 +2016,20 @@ function renderAccountPage(user, opts) {
 
   // Catalogs tab — promotion-grouped tickboxes in a responsive grid.
   const catalogsTab = ''
+    + '<style>'
+    +   '.promotion-drag-handle,.catalog-drag-handle{cursor:grab;touch-action:none;user-select:none;font-weight:700;letter-spacing:-3px;}'
+    +   '.promotion-drag-handle:active,.catalog-drag-handle:active{cursor:grabbing;}'
+    +   '.catalog-sort-group.sorting,.catalog-sort-item.sorting{opacity:.45;}'
+    +   '.catalog-sort-item{min-height:38px;border-radius:4px;padding:2px 0;}'
+    +   '.catalog-sort-item:hover{background:rgba(255,255,255,.035);}'
+    + '</style>'
     + '<div class="card mb-3">'
     +   '<div class="card-body">'
-    +     '<p class="text-secondary small mb-3">Tick the catalogs you want to see in Stremio Discover. Unticked promotions are hidden from your install URL\'s manifest.</p>'
-    +     '<div class="row">' + catGroupsHtml + '</div>'
+    +     '<p class="text-secondary small mb-1">Tick the catalogs you want to see in Stremio Discover. Unticked catalogs are hidden from your install URL\'s manifest.</p>'
+    +     '<p class="text-secondary small mb-3">Drag the handles to reorder promotion blocks or catalogs within a promotion. This order is published directly in your manifest for Nuvio and Stremio.</p>'
+    +     '<input type="hidden" name="promotionOrder" id="promotion-order" value="' + escapeHtml(orderedPromotions.map((p) => p.id).join(',')) + '">'
+    +     '<input type="hidden" name="catalogOrder" id="catalog-order" value="' + escapeHtml(orderedPromotions.flatMap((p) => orderByIds(p.catalogs, cfg.catalogOrder, (c) => c.id).map((c) => c.id)).join(',')) + '">'
+    +     '<div class="row" id="catalog-promotion-order">' + catGroupsHtml + '</div>'
     +   '</div>'
     + '</div>';
 
@@ -2080,6 +2104,27 @@ function renderAccountPage(user, opts) {
     +   'var show = i.type === "password"; i.type = show ? "text" : "password";'
     +   'a.textContent = show ? "Hide" : "Show";'
     + '});'
+    + '(function(){'
+    +   'var root=document.getElementById("catalog-promotion-order"),promotionInput=document.getElementById("promotion-order"),catalogInput=document.getElementById("catalog-order");'
+    +   'if(!root||!promotionInput||!catalogInput)return;'
+    +   'var active=null,kind="",touchPointer=null;'
+    +   'function list(parent,selector){return Array.prototype.slice.call(parent.querySelectorAll(":scope > "+selector));}'
+    +   'function sync(){promotionInput.value=list(root,".catalog-sort-group").map(function(x){return x.getAttribute("data-promotion-id");}).join(",");catalogInput.value=Array.prototype.slice.call(root.querySelectorAll(".catalog-sort-item")).map(function(x){return x.getAttribute("data-catalog-id");}).join(",");}'
+    +   'function fromHandle(handle){if(handle.classList.contains("promotion-drag-handle"))return {item:handle.closest(".catalog-sort-group"),kind:"promotion"};return {item:handle.closest(".catalog-sort-item"),kind:"catalog"};}'
+    +   'function targetAt(el){if(!active)return null;var selector=kind==="promotion"?".catalog-sort-group":".catalog-sort-item";var target=el&&el.closest?el.closest(selector):null;if(!target||target===active)return null;if(kind==="catalog"&&target.parentElement!==active.parentElement)return null;return target;}'
+    +   'function place(target,x,y){if(!target)return;var r=target.getBoundingClientRect(),after;if(kind==="catalog")after=y>r.top+r.height/2;else{var nx=Math.abs((x-(r.left+r.width/2))/Math.max(r.width,1)),ny=Math.abs((y-(r.top+r.height/2))/Math.max(r.height,1));after=ny>nx?y>r.top+r.height/2:x>r.left+r.width/2;}target.parentElement.insertBefore(active,after?target.nextSibling:target);sync();}'
+    +   'function finish(){if(active)active.classList.remove("sorting");active=null;kind="";touchPointer=null;sync();}'
+    +   'root.addEventListener("dragstart",function(e){var h=e.target.closest(".promotion-drag-handle,.catalog-drag-handle");if(!h){e.preventDefault();return;}var d=fromHandle(h);active=d.item;kind=d.kind;active.classList.add("sorting");if(e.dataTransfer){e.dataTransfer.effectAllowed="move";e.dataTransfer.setData("text/plain",kind);}});'
+    +   'root.addEventListener("dragover",function(e){if(!active)return;e.preventDefault();if(e.dataTransfer)e.dataTransfer.dropEffect="move";place(targetAt(e.target),e.clientX,e.clientY);});'
+    +   'root.addEventListener("drop",function(e){if(active)e.preventDefault();finish();});'
+    +   'root.addEventListener("dragend",finish);'
+    +   'root.addEventListener("pointerdown",function(e){if(e.pointerType==="mouse")return;var h=e.target.closest(".promotion-drag-handle,.catalog-drag-handle");if(!h)return;var d=fromHandle(h);active=d.item;kind=d.kind;touchPointer=e.pointerId;active.classList.add("sorting");h.setPointerCapture(e.pointerId);e.preventDefault();});'
+    +   'root.addEventListener("pointermove",function(e){if(touchPointer!==e.pointerId||!active)return;place(targetAt(document.elementFromPoint(e.clientX,e.clientY)),e.clientX,e.clientY);e.preventDefault();});'
+    +   'root.addEventListener("pointerup",function(e){if(touchPointer===e.pointerId)finish();});'
+    +   'root.addEventListener("pointercancel",finish);'
+    +   'root.addEventListener("keydown",function(e){var h=e.target.closest(".promotion-drag-handle,.catalog-drag-handle");if(!h||!["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key))return;var d=fromHandle(h),items=d.kind==="promotion"?list(root,".catalog-sort-group"):list(d.item.parentElement,".catalog-sort-item"),i=items.indexOf(d.item),back=e.key==="ArrowUp"||e.key==="ArrowLeft",j=back?i-1:i+1;if(j<0||j>=items.length)return;e.preventDefault();if(back)d.item.parentElement.insertBefore(d.item,items[j]);else d.item.parentElement.insertBefore(d.item,items[j].nextSibling);sync();h.focus();});'
+    +   'var form=root.closest("form");if(form)form.addEventListener("submit",sync);sync();'
+    + '})();'
     + '</script>';
 
   return tablerChrome.tablerPage('Account', body, { user, currentSection: 'account' });

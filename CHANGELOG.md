@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.43.8
+
+### Per-user catalog ordering
+
+- Added drag handles for reordering promotion blocks and the catalogs inside
+  each promotion on the account Catalogs screen.
+- Added touch/pen dragging and keyboard arrow controls to the same handles.
+- Persisted each account's order and applied it directly to the generated
+  manifest, so Nuvio and Stremio receive catalogs in the chosen sequence.
+- Kept existing accounts compatible and append newly introduced promotions or
+  catalogs without discarding saved ordering.
+
 ## 0.43.7
 
 ### Scene-title keyword matching
