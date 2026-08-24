@@ -29,6 +29,7 @@ const { cleanOrder, orderByIds } = require('./lib/catalog-order');
 const { effectiveCatalogSelection, CURRENT_DEFAULTS_VERSION } = require('./lib/catalog-selection');
 const { buildNuvioCollections } = require('./lib/nuvio-collections');
 const torboxVoyager = require('./lib/sources/torbox-voyager');
+const nativeNewznab = require('./lib/sources/native-newznab');
 const APP_VERSION = require('./package.json').version || '?';
 
 
@@ -46,6 +47,23 @@ function publicOriginFromReq(req) {
   }
   if (config.publicUrl) return config.publicUrl.replace(/\/+$/, '');
   return '';
+}
+
+function formValues(value) {
+  if (Array.isArray(value)) return value;
+  return value === undefined || value === null ? [] : [value];
+}
+
+function newznabIndexersFromBody(body) {
+  const names = formValues(body && body.newznabName);
+  const urls = formValues(body && body.newznabUrl);
+  const apiKeys = formValues(body && body.newznabApiKey);
+  const count = Math.min(nativeNewznab.MAX_INDEXERS, Math.max(names.length, urls.length, apiKeys.length));
+  const raw = [];
+  for (let index = 0; index < count; index += 1) {
+    raw.push({ name: names[index], url: urls[index], apiKey: apiKeys[index] });
+  }
+  return nativeNewznab.normalizeIndexerConfigs(raw);
 }
 
 // Login rate-limiter (0.22.2). In-memory per-client-IP counter of failed login
@@ -316,11 +334,14 @@ function createApp() {
       // the keys we name here, so legacy fields remain on disk but are no
       // longer touched by the UI. The schema still includes them in users.js
       // so existing records continue deserialising cleanly.
-      users.updateUserConfig(req.user.id, {
+      const servicePatch = {
         uuManifestUrl: String(b.uuManifestUrl || '').trim(),
         torboxApiKey: String(b.torboxApiKey || '').trim(),
         easynewsUsername: String(b.easynewsUsername || '').trim(),
         easynewsPassword: String(b.easynewsPassword || ''),
+        torboxEnabled: b.torboxEnabled === 'on' || b.torboxEnabled === '1' || b.torboxEnabled === 'true',
+        uuEnabled: b.uuEnabled === 'on' || b.uuEnabled === '1' || b.uuEnabled === 'true',
+        easynewsEnabled: b.easynewsEnabled === 'on' || b.easynewsEnabled === '1' || b.easynewsEnabled === 'true',
         catalogs: finalCats,
         catalogDefaultsVersion: CURRENT_DEFAULTS_VERSION,
         showCatalogsOnHome: b.showCatalogsOnHome === 'on' || b.showCatalogsOnHome === '1' || b.showCatalogsOnHome === 'true',
@@ -329,7 +350,13 @@ function createApp() {
         maxStreams,
         // 0.38.0: warm-to-cache pseudo-streams toggle (default true).
         showWarmRows: b.showWarmRows === 'on' || b.showWarmRows === '1' || b.showWarmRows === 'true',
-      });
+      };
+      if (config.experimentalNativeNewznab) {
+        servicePatch.nativeNewznabEnabled = b.nativeNewznabEnabled === 'on'
+          || b.nativeNewznabEnabled === '1' || b.nativeNewznabEnabled === 'true';
+        servicePatch.newznabIndexers = newznabIndexersFromBody(b);
+      }
+      users.updateUserConfig(req.user.id, servicePatch);
       res.redirect('/account?flash=saved');
     } catch (err) {
       res.redirect('/account?flash=' + encodeURIComponent('Save failed: ' + err.message));
@@ -448,10 +475,21 @@ function createApp() {
           infoHash,
           creds: req.userAccount.config || null,
           username: req.userAccount.username,
+          userId: req.userAccount.id,
         });
         if (out && out.url) {
           res.setHeader('Cache-Control', 'no-store');
           return res.redirect(302, out.url);
+        }
+        if (out && out.queued) {
+          return res.status(425)
+            .set('Cache-Control', 'no-store')
+            .send('Added to your TorBox Usenet queue. Re-open this event when the download is ready.');
+        }
+        if (out && out.error === 'candidate-expired') {
+          return res.status(410)
+            .set('Cache-Control', 'no-store')
+            .send('This experimental stream link expired. Close and re-open the event to search again.');
         }
         // Not cached / unresolvable on this provider — tell the player plainly.
         res.status(404).send('Not cached on ' + provider + ' (or no longer available).');
@@ -1935,6 +1973,17 @@ function secretField(label, name, value, placeholder) {
     + '</div>';
 }
 
+function pipelineSwitch(name, enabled, label, detail) {
+  return '<div class="border rounded p-3 mb-3">'
+    + '<label class="form-check form-switch mb-1">'
+    +   '<input class="form-check-input" type="checkbox" name="' + escapeHtml(name)
+    +     '" value="on"' + (enabled ? ' checked' : '') + '>'
+    +   '<span class="form-check-label fw-semibold">' + escapeHtml(label) + '</span>'
+    + '</label>'
+    + (detail ? '<div class="text-secondary small ms-4">' + escapeHtml(detail) + '</div>' : '')
+    + '</div>';
+}
+
 function renderAccountPage(user, opts) {
   opts = opts || {};
   const cfg = user.config || {};
@@ -1992,12 +2041,44 @@ function renderAccountPage(user, opts) {
 
   const defaultMaxStreams = parseInt(process.env.STREAM_MAX_ROWS || '20', 10);
 
+  const configuredNewznab = Array.isArray(cfg.newznabIndexers) && cfg.newznabIndexers.length
+    ? cfg.newznabIndexers.slice(0, nativeNewznab.MAX_INDEXERS)
+    : [{ name: '', url: '', apiKey: '' }];
+  const newznabRows = configuredNewznab.map((indexer) => ''
+    + '<div class="newznab-row border rounded p-3 mb-2">'
+    +   '<div class="row g-2">'
+    +     '<div class="col-md-3"><label class="form-label">Name</label>'
+    +       '<input class="form-control" name="newznabName" value="' + escapeHtml(indexer.name || '') + '" placeholder="NZBGeek"></div>'
+    +     '<div class="col-md-5"><label class="form-label">API URL</label>'
+    +       '<input class="form-control text-mono" type="url" name="newznabUrl" value="' + escapeHtml(indexer.url || '') + '" placeholder="https://api.example.com/api"></div>'
+    +     '<div class="col-md-4"><label class="form-label">API key</label>'
+    +       '<div class="input-group input-group-flat"><input class="form-control text-mono" type="password" name="newznabApiKey" value="' + escapeHtml(indexer.apiKey || '') + '" autocomplete="off">'
+    +         '<button class="btn btn-outline-secondary btn-reveal" type="button">Show</button></div></div>'
+    +   '</div>'
+    +   '<button class="btn btn-sm btn-outline-danger mt-2 newznab-remove" type="button">Remove indexer</button>'
+    + '</div>').join('');
+  const nativeNewznabCard = config.experimentalNativeNewznab ? ''
+    + '<div class="alert alert-warning" role="alert"><strong>Experimental install:</strong> native Newznab is isolated behind a distinct addon ID. It does not replace or alter SeriousSportSync stable.</div>'
+    + '<div class="card mb-3 border-warning">'
+    +   '<div class="card-header"><h3 class="card-title">Native Newznab → TorBox Usenet <span class="badge bg-warning text-dark">Experimental</span></h3></div>'
+    +   '<div class="card-body">'
+    +     pipelineSwitch('nativeNewznabEnabled', cfg.nativeNewznabEnabled === true,
+            'Enable native Newznab pipeline', 'Search these indexers and upload only a clicked NZB to your own TorBox account.')
+    +     '<p class="text-secondary small">API keys are encrypted at rest. Search responses stay metadata-only; NZB links remain server-side, and selected NZB bytes are held in memory only long enough to upload to TorBox. Public HTTPS indexers are required by default.</p>'
+    +     '<div id="newznab-indexers">' + newznabRows + '</div>'
+    +     '<button class="btn btn-outline-primary btn-sm" id="newznab-add" type="button">Add indexer</button>'
+    +     '<span class="text-secondary small ms-2">Maximum ' + nativeNewznab.MAX_INDEXERS + '</span>'
+    +   '</div>'
+    + '</div>' : '';
+
   // Services tab — credentials for each provider.
   const servicesTab = ''
     + '<div class="card mb-3">'
     +   '<div class="card-header"><h3 class="card-title">TorBox</h3></div>'
     +   '<div class="card-body">'
     +     '<p class="text-secondary small mb-3">Used by the addon to check which scraper results are already cached on your TorBox subscription, and to return playable URLs only for cached items. Your key never leaves this addon.</p>'
+    +     pipelineSwitch('torboxEnabled', cfg.torboxEnabled !== false,
+            'Enable TorBox torrent pipeline', 'Use companion/Prowlarr torrent results with this TorBox account.')
     +     secretField('TorBox API key', 'torboxApiKey', cfg.torboxApiKey, 'paste your TorBox API key')
     +     '<hr class="my-3">'
     +     '<p class="text-secondary small mb-2"><strong>TorBox Unified diagnostic</strong> — read-only test of Voyager torrent, Usenet, cache, ownership, and your TorBox BYOI sources. This does not add anything to your account.</p>'
@@ -2013,6 +2094,8 @@ function renderAccountPage(user, opts) {
     +   '<div class="card-header"><h3 class="card-title">Easynews</h3></div>'
     +   '<div class="card-body">'
     +     '<p class="text-secondary small mb-3">Stream rows will play directly from members.easynews.com using your subscription. Your password is encrypted at rest and never appears in stream URLs returned to Stremio (auth is injected only at play-time via a signed redirect). Leave blank if you don\'t have an Easynews subscription.</p>'
+    +     pipelineSwitch('easynewsEnabled', cfg.easynewsEnabled !== false,
+            'Enable Easynews pipeline', 'Search and play using the saved Easynews account.')
     +     '<div class="mb-3">'
     +       '<label class="form-label" for="en-user">Easynews username</label>'
     +       '<input class="form-control" type="text" id="en-user" name="easynewsUsername" value="' + escapeHtml(cfg.easynewsUsername || '') + '" placeholder="your Easynews username" autocomplete="off">'
@@ -2025,12 +2108,16 @@ function renderAccountPage(user, opts) {
     +   '<div class="card-header"><h3 class="card-title">Usenet Ultimate</h3></div>'
     +   '<div class="card-body">'
     +     '<p class="text-secondary small mb-3">Stream rows will play through your UU instance. Leave blank if you don\'t use UU.</p>'
+    +     pipelineSwitch('uuEnabled', cfg.uuEnabled !== false,
+            'Enable Usenet Ultimate pipeline', 'Search and play through the saved UU manifest.')
     +     '<div class="mb-3">'
     +       '<label class="form-label" for="uu-url">UU manifest URL</label>'
     +       '<input class="form-control text-mono" type="url" id="uu-url" name="uuManifestUrl" value="' + escapeHtml(cfg.uuManifestUrl || '') + '" placeholder="https://your-usenet-ultimate.elfhosted.com/stremio/&lt;config&gt;/manifest.json">'
     +     '</div>'
     +   '</div>'
     + '</div>'
+
+    + nativeNewznabCard
 
     + '<div class="card mb-3">'
     +   '<div class="card-header"><h3 class="card-title">Result count</h3></div>'
@@ -2150,6 +2237,13 @@ function renderAccountPage(user, opts) {
     // Inline JS: copy install URL + toggle password reveal. Same logic as
     // before, just rebound to Tabler's input-group markup.
     + '<script>'
+    + '(function(){'
+    +   'var root=document.getElementById("newznab-indexers"),add=document.getElementById("newznab-add");if(!root||!add)return;var max=' + nativeNewznab.MAX_INDEXERS + ';'
+    +   'function rows(){return Array.prototype.slice.call(root.querySelectorAll(".newznab-row"));}'
+    +   'function sync(){add.disabled=rows().length>=max;}'
+    +   'add.addEventListener("click",function(){var list=rows();if(!list.length||list.length>=max)return;var clone=list[list.length-1].cloneNode(true);Array.prototype.forEach.call(clone.querySelectorAll("input"),function(input){input.value="";input.type=input.name==="newznabApiKey"?"password":input.type;});var reveal=clone.querySelector(".btn-reveal");if(reveal)reveal.textContent="Show";root.appendChild(clone);sync();});'
+    +   'root.addEventListener("click",function(e){var button=e.target.closest(".newznab-remove");if(!button)return;var row=button.closest(".newznab-row"),list=rows();if(list.length>1)row.remove();else Array.prototype.forEach.call(row.querySelectorAll("input"),function(input){input.value="";});sync();});sync();'
+    + '})();'
     + '(function(){'
     +   'var btn=document.getElementById("torbox-unified-probe"),input=document.getElementById("torbox-unified-query"),out=document.getElementById("torbox-unified-output");if(!btn||!input||!out)return;'
     +   'btn.addEventListener("click",async function(){btn.disabled=true;out.style.display="block";out.textContent="Searching TorBox Voyager and BYOI…";try{var body=new URLSearchParams({query:input.value});var response=await fetch("/account/torbox-unified-probe",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:body.toString()});var payload=await response.json();out.textContent=JSON.stringify(payload,null,2);}catch(err){out.textContent="Probe failed: "+err.message;}finally{btn.disabled=false;}});'

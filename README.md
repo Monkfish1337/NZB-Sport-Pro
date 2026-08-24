@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Monkfish1337/Serioussportsync/releases"><img src="https://img.shields.io/badge/version-0.45.5-blue.svg" alt="Version 0.45.5"></a>
+  <img src="https://img.shields.io/badge/version-0.46.0--experimental.1-orange.svg" alt="Version 0.46.0 experimental 1">
   <a href="https://github.com/Monkfish1337/Serioussportsync/actions/workflows/ci.yml"><img src="https://github.com/Monkfish1337/Serioussportsync/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/Monkfish1337/Serioussportsync/pkgs/container/serioussportsync"><img src="https://img.shields.io/badge/GHCR-container-2496ED?logo=docker&logoColor=white" alt="Container image"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT license"></a>
@@ -18,6 +18,13 @@ SeriousSportSync turns sports events into proper catalog items with dates,
 artwork, metadata, and optional playback results. It is primarily designed for
 [Nuvio](https://github.com/zaarrak/Nuvio), and also works with Stremio and
 compatible clients.
+
+> **Experimental branch — separate from stable:** this branch adds opt-in
+> native per-user Newznab → TorBox Usenet development. It is disabled unless
+> `EXPERIMENTAL_NATIVE_NEWZNAB=on`. When enabled, it uses the distinct manifest
+> ID `community.serioussportsync.experimental` and name
+> `SeriousSportSync Experimental`, so it can be installed beside the current
+> stable release without replacing it.
 
 It hosts no media. Every playback connector is optional, self-hosted or
 user-supplied, and remains under the operator's control.
@@ -57,6 +64,7 @@ returns only the rows that finish within the configured request budget.
 | Companion scraper | TorBox | Combines Prowlarr, Zilean, Torznab, and other configured companion sources |
 | Usenet Ultimate | Usenet Ultimate / NzbDAV | Sends event title variants to the user's UU instance; UU searches its configured indexers and handles playback |
 | Easynews | Easynews | Searches and plays with credentials stored on the user's account |
+| Native Newznab (experimental) | TorBox Usenet | Searches only the current user's indexers; fetches and uploads an NZB in memory only after that row is clicked |
 
 > **Usenet Ultimate compatibility:** direct sports-title search requires the
 > endpoint proposed in [Usenet Ultimate PR #46](https://github.com/DSmart33/Usenet-Ultimate/pull/46).
@@ -67,6 +75,43 @@ returns only the rows that finish within the configured request budget.
 Credentials are encrypted at rest where applicable and are never included in
 the stream list returned to the client. TorBox and Easynews playback use signed,
 short-lived resolve URLs.
+
+Each account has an independent enable switch for TorBox torrents, Usenet
+Ultimate, Easynews, and experimental native Newznab. Credentials remain saved
+when a pipeline is disabled, making side-by-side diagnosis possible without
+removing keys or URLs.
+
+### Experimental native Newznab
+
+Set `EXPERIMENTAL_NATIVE_NEWZNAB=on`, restart SSS, then install the separately
+named experimental manifest from the Account page. Add up to five per-user
+Newznab API endpoints and keys under Services and enable the native pipeline.
+The user's TorBox API key is also required.
+
+For side-by-side testing from this branch, use the dedicated Compose file:
+
+~~~bash
+cp .env.example .env.experimental
+# edit .env.experimental with a separate SESSION_SECRET and account settings
+docker compose -f docker-compose.experimental.yml up -d --build
+~~~
+
+It builds the checked-out source as `serioussportsync:0.46.0-experimental.1`
+and uses container `serioussportsync-experimental`, host port `7001`, and a
+separate `serioussportsync_experimental_data` volume. The normal stable
+container, `.env`, port `7000`, image, and data volume are not touched.
+
+Searches are read-only. Credential-bearing result links stay in a short-lived
+server memory store and are represented in clients by opaque, signed tokens.
+Only after a user clicks a result does SSS fetch the selected NZB into bounded
+memory, upload it to that user's TorBox account, and discard the local bytes.
+Cached jobs play immediately where TorBox exposes their files; uncached jobs
+are queued and the user re-opens the event when ready.
+
+For a future public deployment, private/local indexer targets, cross-host
+download links, and non-HTTPS endpoints are rejected by default. Local testing
+can explicitly opt into `NATIVE_NEWZNAB_ALLOW_PRIVATE=on` and
+`NATIVE_NEWZNAB_ALLOW_HTTP=on`; neither override should be used publicly.
 
 ## Quick start with Docker Compose
 

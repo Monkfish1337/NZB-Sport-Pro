@@ -6,6 +6,15 @@ function num(v, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function enabled(v) {
+  return /^(1|true|yes|on)$/i.test(String(v || ''));
+}
+
+// Native per-user Newznab -> TorBox Usenet is intentionally isolated from
+// the stable release. Enabling it gives the addon a distinct manifest ID and
+// name so an experimental install can coexist with SeriousSportSync stable.
+const experimentalNativeNewznab = enabled(process.env.EXPERIMENTAL_NATIVE_NEWZNAB);
+
 // TSDB_SEASONS handling: 'auto' (or unset/empty) -> derived from the event
 // window at runtime so we only hit TSDB for years that actually overlap
 // the cache. Explicit comma list (e.g. "2024,2025,2026") forces those.
@@ -25,10 +34,16 @@ module.exports = {
 
   addonType: process.env.ADDON_TYPE || 'movie',
 
-  addonId: 'community.serioussportsync',
-  addonName: 'SeriousSportSync',
-  addonDescription:
-    'Self-hosted sports event metadata and calendar for Stremio/Nuvio, with optional TorBox, Usenet Ultimate, and Easynews playback pipelines.',
+  addonId: experimentalNativeNewznab
+    ? 'community.serioussportsync.experimental'
+    : 'community.serioussportsync',
+  addonName: experimentalNativeNewznab
+    ? 'SeriousSportSync Experimental'
+    : 'SeriousSportSync',
+  addonDescription: experimentalNativeNewznab
+    ? 'Experimental SeriousSportSync build with opt-in native per-user Newznab to TorBox Usenet playback.'
+    : 'Self-hosted sports event metadata and calendar for Stremio/Nuvio, with optional TorBox, Usenet Ultimate, and Easynews playback pipelines.',
+  experimentalNativeNewznab,
 
   idPrefix: 'ufc',
 

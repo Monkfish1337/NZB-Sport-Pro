@@ -3,6 +3,7 @@ node_modules/
 
 # Local secrets — NEVER commit
 .env
+.env.experimental
 .env.local
 .env.*.local
 
