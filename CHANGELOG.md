@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.45.4
+
+### Prowlarr torrent hash recovery
+
+- Authenticated Prowlarr download-proxy hydration requests and safely followed
+  redirects without forwarding the API key to external indexer hosts.
+- Added info-hash recovery from ordinary `.torrent` response bodies so raw
+  Prowlarr hits are no longer discarded when no magnet redirect is available.
+
 ## 0.45.3
 
 ### Manchester United torrent discovery
