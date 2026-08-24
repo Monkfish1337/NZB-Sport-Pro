@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.44.1
+
+### Nuvio collection artwork
+
+- Renamed the generated collection from SSS to SeriousSportSync.
+- Added matching orange-and-black folder artwork for Combat Sports,
+  Wrestling, Football, and Motorsport instead of using promotion artwork.
+
 ## 0.44.0
 
 ### Nuvio collections export

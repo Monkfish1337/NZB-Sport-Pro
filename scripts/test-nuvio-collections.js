@@ -22,6 +22,7 @@ function build(userConfig) {
 const all = build();
 assert.strictEqual(all.length, 1, 'exports exactly one SSS collection');
 assert.strictEqual(all[0].id, COLLECTION_ID, 'uses the stable collection ID');
+assert.strictEqual(all[0].title, 'SeriousSportSync', 'uses the full product name');
 assert.deepStrictEqual(
   all[0].folders.map((folder) => folder.title),
   FOLDERS.map((folder) => folder.title),
@@ -35,6 +36,11 @@ assert.strictEqual(
 
 for (const folder of all[0].folders) {
   assert.ok(folder.sources.length > 0, folder.title + ' contains catalogs');
+  assert.match(
+    folder.coverImageUrl,
+    /^https:\/\/sss\.example\/assets\/collection-[a-z-]+\.png$/,
+    folder.title + ' uses dedicated collection artwork',
+  );
   assert.strictEqual(
     folder.sources.length,
     folder.catalogSources.length,
