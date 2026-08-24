@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.44.2
+
+### Catalog home-row visibility
+
+- Added a per-account option to hide enabled catalog rows from the generated
+  manifest while keeping their endpoints available to imported Nuvio
+  collections.
+- Existing accounts continue showing home rows unless they explicitly switch
+  to a collections-only layout.
+
 ## 0.44.1
 
 ### Nuvio collection artwork

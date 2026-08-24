@@ -2,6 +2,7 @@
 
 const assert = require('assert');
 const config = require('../config');
+const { buildManifest } = require('../lib/manifest');
 const {
   buildNuvioCollections,
   COLLECTION_ID,
@@ -79,4 +80,16 @@ assert.deepStrictEqual(
   'exports only enabled catalogs',
 );
 
-console.log('OK — Nuvio collection schema, filtering, ordering, and stable IDs verified.');
+const defaultManifest = buildManifest({ user: { config: {} } });
+assert.ok(defaultManifest.catalogs.length > 0, 'existing users keep home catalog rows by default');
+
+const collectionsOnlyManifest = buildManifest({
+  user: { config: { showCatalogsOnHome: false } },
+});
+assert.deepStrictEqual(collectionsOnlyManifest.catalogs, [], 'collections-only mode hides home catalog rows');
+assert.ok(
+  collectionsOnlyManifest.resources.some((resource) => resource.name === 'catalog'),
+  'collections-only mode retains the catalog resource used by collection sources',
+);
+
+console.log('OK — Nuvio collection schema, visibility, filtering, ordering, and stable IDs verified.');
