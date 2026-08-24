@@ -606,7 +606,12 @@ function createApp() {
       return res.redirect('/admin/promotions?flash=' + encodeURIComponent('Refresh: promotion "' + id + '" is disabled'));
     }
     runEventsRefresh({ promotionId: id, log: (m) => console.log(m) })
-      .then((result) => console.log('[admin] per-promotion refresh "' + id + '" complete: ' + JSON.stringify(result)))
+      .then((result) => {
+        const line = '[admin] per-promotion refresh "' + id + '" '
+          + (result.ok ? 'complete: ' : 'failed: ') + JSON.stringify(result);
+        if (result.ok) console.log(line);
+        else console.error(line);
+      })
       .catch((err) => console.error('[admin] per-promotion refresh "' + id + '" failed: ' + err.message));
     res.redirect('/admin/promotions?flash=' + encodeURIComponent('Refresh started for "' + p.name + '" — other promotions untouched. Check server logs for progress.'));
   });

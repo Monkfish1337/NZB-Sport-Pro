@@ -135,11 +135,10 @@ async function refreshPromotion(promotion, log) {
   } else if (promotion.source.type === 'tmdb') {
     // 0.42.13: TMDB TV show. Fetches all episodes with air dates. Each becomes
     // an event whose date drives DARKSPORT-style search title generation.
-    if (!tmdb) { log('  tmdb module unavailable - skipping'); return { ok: true }; }
+    if (!tmdb) throw new Error('TMDB source module is unavailable; promotion was not refreshed');
     const tk = (config && config.tmdb && config.tmdb.apiKey) || (process.env.TMDB_API_KEY || '');
     if (!tk) {
-      log('  tmdb: no API key configured (set TMDB_API_KEY env) - skipping ' + promotion.id);
-      return { ok: true };
+      throw new Error('TMDB_API_KEY is not configured; promotion "' + promotion.id + '" was not refreshed');
     }
     const tvIds = Array.isArray(promotion.source.tvIds) && promotion.source.tvIds.length
       ? promotion.source.tvIds
@@ -246,12 +245,14 @@ async function runRefresh(options) {
   }
 
   let totalAdded = 0, totalUpdated = 0, totalSkipped = 0;
+  const failures = [];
   for (const p of toFetch) {
     let raw;
     try {
       raw = await refreshPromotion(p, log);
     } catch (err) {
       log('  ' + p.id + ' FATAL: ' + err.message);
+      failures.push({ promotion: p.id, error: err.message });
       continue;
     }
     if (!Array.isArray(raw)) continue;
@@ -343,8 +344,17 @@ async function runRefresh(options) {
   store.saveToDisk({ updatedAt: new Date().toISOString(), events: merged });
 
   const dur = ((Date.now() - start) / 1000).toFixed(1);
-  log('[refresh] done in ' + dur + 's — ' + merged.length + ' total (' + totalAdded + ' new, ' + totalUpdated + ' updated, ' + totalSkipped + ' skipped)');
-  return { ok: true, total: merged.length, added: totalAdded, updated: totalUpdated };
+  const ok = failures.length === 0;
+  log('[refresh] done in ' + dur + 's — ' + merged.length + ' total (' + totalAdded + ' new, ' + totalUpdated + ' updated, ' + totalSkipped + ' skipped'
+    + (failures.length ? ', ' + failures.length + ' failed' : '') + ')');
+  const result = { ok, total: merged.length, added: totalAdded, updated: totalUpdated };
+  if (failures.length) {
+    result.error = failures.length === 1
+      ? failures[0].error
+      : failures.length + ' promotions failed to refresh';
+    result.failures = failures;
+  }
+  return result;
 }
 
 if (require.main === module) {

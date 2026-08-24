@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.43.4
+
+### Refresh failure reporting
+
+- Targeted TMDB promotion refreshes now return `ok: false` with an explicit
+  error when `TMDB_API_KEY` is missing or the TMDB source is unavailable.
+- Admin logs now label unsuccessful per-promotion results as `failed` instead
+  of reporting them as complete with zero updates.
+
 ## 0.43.3
 
 ### Match of the Day catalog
