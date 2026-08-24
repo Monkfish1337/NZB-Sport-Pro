@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.43.6
+
+### Remove proactive stream warming
+
+- Removed the scheduled and boot-time all-event stream-candidate warmer.
+- Removed the manual global warm route, persistent candidate database, warmer
+  status files, configuration variables, and health-page controls.
+- Companion and direct Prowlarr discovery are now strictly request-only for
+  the single event a user opens.
+- Kept explicit per-event admin tools using short-lived in-memory candidates;
+  they never launch a catalog-wide search.
+
 ## 0.43.5
 
 ### Match of the Day catalog lifecycle

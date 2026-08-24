@@ -71,28 +71,6 @@ function scheduleBackgroundWork(currentCount) {
     console.log('[serioussportsync] periodic refresh disabled (REFRESH_INTERVAL_HOURS=0)');
   }
 
-  // Proactive stream-candidate warmer (0.16.0). Pre-fills data/stream-cache.json
-  // so user stream requests skip the live indexer search. Independent of the
-  // metadata refresh above.
-  if (config.streamCache.refresh && config.streamCache.refreshHours > 0) {
-    const { runStreamRefresh } = require('./scripts/refresh-streams');
-    const sms = Math.round(config.streamCache.refreshHours * 60 * 60 * 1000);
-    console.log(`[serioussportsync] scheduling stream-cache warm every ${config.streamCache.refreshHours}h`);
-    // First warm shortly after boot, delayed so an empty-cache metadata
-    // refresh has a chance to land events first.
-    const kick = setTimeout(() => {
-      runStreamRefresh({ log: (m) => console.log(m) }).catch((err) =>
-        console.error('[serioussportsync] stream warm failed:', err.message));
-    }, 60 * 1000);
-    if (typeof kick.unref === 'function') kick.unref();
-    const st = setInterval(() => {
-      runStreamRefresh({ log: (m) => console.log(m) }).catch((err) =>
-        console.error('[serioussportsync] stream warm failed:', err.message));
-    }, sms);
-    if (typeof st.unref === 'function') st.unref();
-  } else {
-    console.log('[serioussportsync] proactive stream-cache warm disabled (STREAM_CACHE_REFRESH=off)');
-  }
 }
 
 // Graceful shutdown so Docker's SIGTERM closes connections cleanly.

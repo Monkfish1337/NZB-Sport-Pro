@@ -121,31 +121,6 @@ module.exports = {
   // checkboxes). Opt-in: uses debrid storage quota.
   autoCacheOnMiss: (process.env.AUTO_CACHE_ON_MISS || '').toLowerCase() === 'on',
 
-  // Persistent stream-candidate cache (0.16.0). The merged candidate
-  // candidate list per event is cached to disk so repeat/concurrent stream
-  // requests skip the live indexer search. Resolved debrid streams are NOT
-  // stored here (they're per-user, in-memory). A background warmer
-  // (scripts/refresh-streams.js) repopulates it on a timer.
-  streamCache: {
-    file: process.env.STREAM_CACHE_FILE || './data/stream-cache.json',
-    // How long a cached candidate list stays usable. 0 = never expire.
-    ttlHours: parseFloat(process.env.STREAM_CACHE_TTL_HOURS || '6'),
-    // Proactive warmer: 'off' disables the timer (cache still works on demand).
-    refresh: (process.env.STREAM_CACHE_REFRESH || 'on').toLowerCase() !== 'off',
-    refreshHours: parseFloat(process.env.STREAM_CACHE_REFRESH_HOURS || '3'),
-    // Which events the warmer walks, relative to today. Stream warming is
-    // backward-looking: torrents only exist after an event airs, so there's
-    // no point pre-searching far-future events. Default +1 covers today and
-    // tomorrow; metadata's separate +180 window still lists upcoming events
-    // in the catalog.
-    windowDaysBack:  num(process.env.STREAM_CACHE_WINDOW_DAYS_BACK,  90),
-    windowDaysAhead: num(process.env.STREAM_CACHE_WINDOW_DAYS_AHEAD, 1),
-    // Empty candidate lists (event aired but nothing seeded yet, or no content
-    // at all) get a much shorter TTL than the 6h above, so a recently-aired
-    // event is re-checked soon instead of serving an empty result all day.
-    emptyTtlMinutes: parseFloat(process.env.STREAM_CACHE_EMPTY_TTL_MINUTES || '30'),
-  },
-
   // Real-Debrid keyword + 451 denylist (0.22.1). RD started keyword-filtering
   // cached torrents in May 2026 (HTTP 451 / infringing_file). Two-layer defence:
   //   (1) blockedKeywords — skip the RD row at /stream time for any candidate
@@ -188,11 +163,12 @@ module.exports = {
     ttlDays: parseFloat(process.env.POSITIVE_CACHE_TTL_DAYS || '7'),
   },
 
-  // Warmer-time cache verification (0.23.1). Provide either provider's key
-  // here to enable that provider's verification; both empty disables warmer
-  // verification (falls back to optimistic + denylist for everyone).
-  warmer: {
-    tbToken:  process.env.WARMER_TB_TOKEN || '',
-    pmApiKey: process.env.WARMER_PM_KEY   || '',
+  // Optional admin power-tool credentials. These are used only for explicit
+  // per-event verify/warm actions initiated by an administrator.
+  adminPowerTool: {
+    // WARMER_* fallbacks preserve existing deployments after removal of the
+    // global warmer; both values are used only on explicit admin actions.
+    tbToken:  process.env.ADMIN_TB_TOKEN || process.env.WARMER_TB_TOKEN || '',
+    pmApiKey: process.env.ADMIN_PM_KEY   || process.env.WARMER_PM_KEY   || '',
   },
 };

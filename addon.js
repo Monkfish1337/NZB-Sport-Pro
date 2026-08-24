@@ -6,9 +6,7 @@ const { handleCatalog } = require('./lib/catalog');
 const { handleMeta } = require('./lib/meta');
 const { handleStream, resolvePlay } = require('./lib/streams');
 const store = require('./lib/store');
-const streamcache = require('./lib/streamcache');
 const settings = require('./lib/settings');
-const { runStreamRefresh, readStatus: readWarmerStatus } = require('./scripts/refresh-streams');
 const { runRefresh: runEventsRefresh } = require('./scripts/refresh');
 const promotions = require('./lib/promotions');
 const users = require('./lib/users');
@@ -568,21 +566,8 @@ function createApp() {
     }
   });
 
-  // Manually trigger the proactive stream-candidate warmer. Fire-and-forget so
-  // the admin gets an immediate redirect rather than blocking on the whole walk.
-  // 0.36.0: kept for backward compat with any external scripts hitting this
-  // endpoint, but the UI button now points at /admin/refresh-events instead
-  // (the events refresh is far more useful — populates newly-added custom
-  // promotions without waiting for the 6h scheduled refresh).
-  app.post('/admin/refresh-streams', requireAdmin, (req, res) => {
-    runStreamRefresh({ log: (m) => console.log(m) })
-      .then((r) => console.log('[admin] manual stream warm: ' + JSON.stringify(r)))
-      .catch((err) => console.error('[admin] manual stream warm failed:', err.message));
-    res.redirect('/admin?flash=' + encodeURIComponent('Stream-cache warm started in the background — check server logs for progress.'));
-  });
-
   // 0.36.0: Refresh catalogs button. Fires scripts/refresh.js (events from
-  // TSDB / Wikipedia / etc) rather than the stream warmer. Most useful right
+  // TSDB / Wikipedia / etc). Most useful right
   // after adding a custom promotion via /admin/promotions — events show up
   // in the catalog within ~minute(s) without waiting on the scheduled refresh.
   app.post('/admin/refresh-events', requireAdmin, (req, res) => {
@@ -618,9 +603,8 @@ function createApp() {
 
   // 0.28.0: admin per-event power tool. Pick an event, re-search its
   // indexers, pick specific torrents, warm them on the admin's TB/PM keys,
-  // and re-verify the candidate cache — all without touching the global
-  // 3-hour warmer cycle. Replaces the user-facing auto-warm that was
-  // disabled in 0.26.2 because of TB 429 cascades.
+  // and re-verify candidates for that event. Replaces the user-facing
+  // auto-warm that was disabled in 0.26.2 because of TB 429 cascades.
   app.get('/admin/power-tool', requireAdmin, (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
@@ -657,7 +641,7 @@ function createApp() {
   });
   // 0.28.2: LIVE Prowlarr/Zilean search. Admin types a free-form query;
   // we hit the indexers directly and stash the results so the next page
-  // render can show them. No relevance filter, no streamcache write —
+  // render can show them. No relevance filter or persistent write —
   // results sit in memory per-admin per-event until the commit step.
   app.post('/admin/power-tool/live-search', requireAdmin, async (req, res) => {
     const eventId = String(req.body.event || '').trim();
@@ -749,8 +733,8 @@ function createApp() {
   });
 
   // 0.24.0: admin observability page. Surfaces denylist sizes, positive-cache
-  // hits, warmer last-run stats, and candidate cache stats — everything that
-  // used to require SSH + cat. Each card has wipe buttons for the things that
+  // hits and provider state — everything that used to require SSH + cat.
+  // Each card has wipe buttons for the things that
   // are safe to nuke (denylists / positive cache; not user data).
   app.get('/admin/health', requireAdmin, (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -776,7 +760,7 @@ function createApp() {
 
   // Backup endpoint (0.24.0). Streams a timestamped tar.gz of the data/
   // directory to the admin as a download. Includes events.json, users.json,
-  // settings, all denylists, positive cache, stream cache, warmer status —
+  // settings, all denylists, positive cache, and other runtime state —
   // everything that lives in the named Docker volume. Pipe-streams via the
   // container's bundled tar binary so we don't bloat the npm tree.
   app.get('/admin/backup', requireAdmin, (req, res) => {
@@ -1298,12 +1282,6 @@ function renderAdminPage(currentUser, opts) {
       + '</tr>';
   }).join('');
 
-  // Stream-cache stats for the refresh card. The actual button drives
-  // /admin/refresh-events (the catalog-events refresh, not the stream warmer).
-  let scStats = { total: 0, fresh: 0, stale: 0, updatedAt: null, ttlHours: 0 };
-  try { scStats = streamcache.stats(); } catch (e) { /* file may not exist yet */ }
-  const scUpdated = scStats.updatedAt ? scStats.updatedAt.slice(0, 16).replace('T', ' ') : 'never';
-
   // Torrent discovery endpoints are optional and may be used together.
   const _comp = settings.getCompanion();
   const _prowlarr = settings.getProwlarr();
@@ -1336,7 +1314,7 @@ function renderAdminPage(currentUser, opts) {
 
     +       '<hr class="my-4">'
     +       '<h4 class="mb-2">Direct Prowlarr (optional)</h4>'
-    +       '<p class="text-secondary small mb-3">Query Prowlarr directly when a user opens an event. Direct Prowlarr is never used by the scheduled cache warmer. Results are filtered and checked against each user\'s TorBox account; raw torrent rows are never returned. The URL must be reachable from this container. For a separate Dockge stack, use a shared Docker network or the server address; <code>localhost</code> refers to this container.</p>'
+    +       '<p class="text-secondary small mb-3">Query Prowlarr directly when a user opens an event. Discovery is request-only and limited to that event. Results are filtered and checked against each user\'s TorBox account; raw torrent rows are never returned. The URL must be reachable from this container. For a separate Dockge stack, use a shared Docker network or the server address; <code>localhost</code> refers to this container.</p>'
     +       '<div class="mb-3">'
     +         '<label class="form-label">Prowlarr URL</label>'
     +         '<input class="form-control text-mono" type="url" name="prowlarrUrl" value="' + escapeHtml(_prowlarr.url) + '" placeholder="http://prowlarr:9696" autocomplete="off">'
@@ -1369,7 +1347,6 @@ function renderAdminPage(currentUser, opts) {
     +   '<div class="card-header"><h3 class="card-title">Catalogs</h3></div>'
     +   '<div class="card-body">'
     +     '<p class="text-secondary small mb-3">Pulls fresh event metadata from TSDB (and any other configured sources) for every enabled promotion — built-in and custom. Runs in the background; scheduled refresh fires every 6h regardless. Use this button after adding a new custom promotion so its events appear without waiting on the scheduler.</p>'
-    +     '<p class="text-secondary small mb-3">Stream candidate cache: <strong>' + scStats.fresh + '</strong> fresh / <strong>' + scStats.total + '</strong> cached events · last warmed ' + escapeHtml(scUpdated) + '</p>'
     +     '<form method="POST" action="/admin/refresh-events" class="d-inline">'
     +       '<button class="btn btn-primary" type="submit">Refresh catalogs now</button>'
     +     '</form>'
@@ -1424,9 +1401,8 @@ function renderAdminPage(currentUser, opts) {
   return tablerChrome.tablerPage('Admin', body, { user: currentUser, currentSection: 'admin' });
 }
 
-// 0.24.0: admin observability page. Pure render — no state mutation. All the
-// data lives in lib/{rd,tb,pm}-denylist, lib/positive-cache, lib/streamcache,
-// and scripts/refresh-streams' status file.
+// 0.24.0: admin observability page. Pure render — no state mutation. State
+// lives in the provider denylists and positive cache.
 function renderHealthPage(currentUser, opts) {
   opts = opts || {};
   const flashHtml = opts.flash
@@ -1478,50 +1454,11 @@ function renderHealthPage(currentUser, opts) {
       + '</form>'
   );
 
-  // Candidate cache
-  let scS = { total: 0, fresh: 0, stale: 0, updatedAt: null, ttlHours: 0 };
-  try { scS = streamcache.stats(); } catch (e) { /* */ }
-  const scUpdated = scS.updatedAt ? scS.updatedAt.slice(0, 16).replace('T', ' ') : 'never';
-  const streamCacheCardHtml = statCard(
-    'Candidate cache',
-    '<strong>' + scS.fresh + '</strong> <span class="text-secondary fs-4">/ ' + scS.total + ' fresh</span>',
-    'TTL ' + scS.ttlHours + 'h &middot; last warmed ' + escapeHtml(scUpdated),
-    '<form method="POST" action="/admin/refresh-streams" class="d-inline">'
-      + '<button type="submit" class="btn btn-sm btn-outline-primary">Warm now</button>'
-      + '</form>'
-  );
-
-  // Warmer last run
-  let w = null;
-  try { w = readWarmerStatus && readWarmerStatus(); } catch (e) { w = null; }
-  let warmerCardHtml;
-  if (w) {
-    const endStr = (w.lastRunEnd || '').slice(0, 16).replace('T', ' ');
-    const verifyLine = w.verifyEnabled
-      ? 'TB: ' + (w.tbHits || 0) + ' cached / ' + (w.tbMisses || 0) + ' not &middot; PM: ' + (w.pmHits || 0) + ' cached / ' + (w.pmMisses || 0) + ' not'
-      : 'verification disabled (set WARMER_TB_TOKEN / WARMER_PM_KEY)';
-    warmerCardHtml = statCard(
-      'Last warmer run',
-      '<strong>' + (w.warmed || 0) + '</strong> <span class="text-secondary fs-4">warmed</span>',
-      (w.failed || 0) + ' failed, ' + (w.totalCands || 0) + ' total candidates &middot; ' + verifyLine
-        + ' &middot; window &minus;' + (w.windowDaysBack || 0) + 'd / +' + (w.windowDaysAhead || 0) + 'd'
-        + ' &middot; ' + (w.durationSeconds || 0) + 's &middot; finished ' + escapeHtml(endStr),
-      null
-    );
-  } else {
-    warmerCardHtml = statCard(
-      'Last warmer run',
-      '<span class="text-secondary fs-3">No data</span>',
-      'No warmer run recorded yet. The warmer runs every ' + config.streamCache.refreshHours + 'h (scheduled) or via "Warm now".',
-      null
-    );
-  }
-
   // Backup card
   const backupCardHtml = statCard(
     'Backup',
     '<span class="text-secondary fs-3">tar.gz</span>',
-    'Timestamped tar.gz of /app/data (events, users, denylists, positive cache, stream cache, warmer status).',
+    'Timestamped tar.gz of /app/data (events, users, settings, denylists, and positive cache).',
     '<a href="/admin/backup" class="btn btn-sm btn-outline-primary">Download backup</a>'
   );
 
@@ -1530,7 +1467,7 @@ function renderHealthPage(currentUser, opts) {
     +   '<div class="row align-items-center">'
     +     '<div class="col">'
     +       '<h2 class="page-title">Health</h2>'
-    +       '<div class="text-secondary mt-1">Admin observability — denylists, positive cache, warmer status, candidate cache.</div>'
+    +       '<div class="text-secondary mt-1">Admin observability — provider denylists and positive cache.</div>'
     +     '</div>'
     +   '</div>'
     + '</div>'
@@ -1540,8 +1477,6 @@ function renderHealthPage(currentUser, opts) {
     +   denyCard('TB', tbDenylist)
     +   denyCard('PM', pmDenylist)
     +   positiveCardHtml
-    +   streamCacheCardHtml
-    +   warmerCardHtml
     +   backupCardHtml
     + '</div>';
 
@@ -1563,7 +1498,7 @@ function renderLogsPage(currentUser, q) {
   const stats = logBuffer.counts();
   const rows = logBuffer.filtered({ category, user: userFilter, substring, level, limit });
 
-  const knownCats = ['stream','resolve','warm','refresh','admin','server','denylist','positive-cache','dead-indexer','onefc','crypto-keys','streamcache','users','other'];
+  const knownCats = ['stream','resolve','warm','refresh','admin','server','denylist','positive-cache','dead-indexer','onefc','crypto-keys','users','other'];
   const seenCats = new Set(Object.keys(stats.byCategory || {}));
   knownCats.forEach((c) => seenCats.add(c));
   const cats = ['all', ...Array.from(seenCats).sort()];
@@ -1686,8 +1621,8 @@ function renderPowerToolPage(currentUser, q) {
   const page = Math.max(1, parseInt(q.page, 10) || 1);
   const PAGE_SIZE = 10;
 
-  const tbKeySet = !!(config.warmer && config.warmer.tbToken);
-  const pmKeySet = !!(config.warmer && config.warmer.pmApiKey);
+  const tbKeySet = !!(config.adminPowerTool && config.adminPowerTool.tbToken);
+  const pmKeySet = !!(config.adminPowerTool && config.adminPowerTool.pmApiKey);
 
   // Event picker datalist — all events sorted most-recent first.
   const allEvents = powerTool.listEvents();
@@ -1720,7 +1655,7 @@ function renderPowerToolPage(currentUser, q) {
       +     '</form>'
       +     '<form method="POST" action="/admin/power-tool/reverify" style="display:inline;">'
       +       '<input type="hidden" name="event" value="' + escapeHtml(brief.id) + '">'
-      +       '<button class="btn-sm" type="submit"' + (tbKeySet || pmKeySet ? '' : ' disabled title="Set WARMER_TB_TOKEN / WARMER_PM_KEY in .env first"') + '>♻️ Re-verify cache</button>'
+      +       '<button class="btn-sm" type="submit"' + (tbKeySet || pmKeySet ? '' : ' disabled title="Set ADMIN_TB_TOKEN / ADMIN_PM_KEY in .env first"') + '>♻️ Re-verify</button>'
       +     '</form>'
       +   '</div>'
       + '</div>'
@@ -1743,11 +1678,11 @@ function renderPowerToolPage(currentUser, q) {
   if (ev) {
     if (evaluated === null) {
       candidatesBlock = '<div class="pt-card"><h3>Candidates</h3>'
-        + '<div class="pt-row pt-sub">No candidate cache for this event yet. Click "🔎 Search indexers" above to populate it.</div>'
+        + '<div class="pt-row pt-sub">No candidates retained for this event. Click "🔎 Search indexers" above.</div>'
         + '</div>';
     } else if (evaluated.total === 0) {
       candidatesBlock = '<div class="pt-card"><h3>Candidates</h3>'
-        + '<div class="pt-row pt-sub">Candidate cache is empty — indexers returned 0 results. Re-run search later or check Prowlarr/Zilean directly.</div>'
+        + '<div class="pt-row pt-sub">The event search returned 0 results. Re-run later or check Prowlarr/Zilean directly.</div>'
         + '</div>';
     } else {
       // Filter chain: indexer first, then relevance.
@@ -1844,8 +1779,8 @@ function renderPowerToolPage(currentUser, q) {
         +   pagination
         +   '<div style="margin-top:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-top:12px;border-top:1px solid var(--border);">'
         +     '<span id="picked-count" style="color:var(--muted);font-size:12px;">0 selected</span>'
-        +     '<button type="submit" name="provider" value="tb" class="btn btn-primary w-100 mt-3" style="margin:0;padding:9px 16px;width:auto;"' + (tbKeySet ? '' : ' disabled title="WARMER_TB_TOKEN not set in .env"') + '>🔥 Warm selected on TB</button>'
-        +     '<button type="submit" name="provider" value="pm" class="btn btn-primary w-100 mt-3" style="margin:0;padding:9px 16px;width:auto;"' + (pmKeySet ? '' : ' disabled title="WARMER_PM_KEY not set in .env"') + '>🔥 Warm selected on PM</button>'
+        +     '<button type="submit" name="provider" value="tb" class="btn btn-primary w-100 mt-3" style="margin:0;padding:9px 16px;width:auto;"' + (tbKeySet ? '' : ' disabled title="ADMIN_TB_TOKEN not set in .env"') + '>🔥 Warm selected on TB</button>'
+        +     '<button type="submit" name="provider" value="pm" class="btn btn-primary w-100 mt-3" style="margin:0;padding:9px 16px;width:auto;"' + (pmKeySet ? '' : ' disabled title="ADMIN_PM_KEY not set in .env"') + '>🔥 Warm selected on PM</button>'
         +   '</div>'
         + '</form>'
         + '<div class="pt-row pt-sub" style="margin-top:10px;font-size:11px;">'
@@ -1905,13 +1840,13 @@ function renderPowerToolPage(currentUser, q) {
   const keyStatusBar = ''
     + '<div style="font-size:12px;color:var(--muted);margin-bottom:14px;">'
     +   'Admin warm keys: '
-    +   'TB ' + (tbKeySet ? '<span style="color:#7fd089;">configured</span>' : '<span style="color:var(--accent2);">not set</span> (WARMER_TB_TOKEN)')
-    +   ' &middot; PM ' + (pmKeySet ? '<span style="color:#7fd089;">configured</span>' : '<span style="color:var(--accent2);">not set</span> (WARMER_PM_KEY)')
+    +   'TB ' + (tbKeySet ? '<span style="color:#7fd089;">configured</span>' : '<span style="color:var(--accent2);">not set</span> (ADMIN_TB_TOKEN)')
+    +   ' &middot; PM ' + (pmKeySet ? '<span style="color:#7fd089;">configured</span>' : '<span style="color:var(--accent2);">not set</span> (ADMIN_PM_KEY)')
     + '</div>';
 
   const body = styles
     + '<p style="color:var(--muted);font-size:13px;margin:0 0 10px;">'
-    +   'Per-event admin tool — re-search indexers, warm chosen candidates onto the admin\'s TB/PM libraries, and re-verify the cache so rows appear in users\' /stream immediately. Bypasses the global 3-hour warm cycle.'
+    +   'Per-event admin tool — explicitly search one event, inspect candidates, and optionally verify or warm selected hashes on the admin\'s TB/PM libraries. Results are held in memory for 30 minutes.'
     + '</p>'
     + keyStatusBar
     + (flash ? '<div class="flash">' + escapeHtml(flash) + '</div>' : '')
