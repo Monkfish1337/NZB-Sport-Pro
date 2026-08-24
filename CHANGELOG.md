@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.45.0
+
+### Manchester United catalogs
+
+- Added built-in `Man United Upcoming` and `Man United Recent` catalogs.
+- Added team-scoped football-data.org refreshes so Manchester United fixtures
+  are combined across every competition available to the configured API key.
+- Added domestic and European opponent aliases, exact-date release matching,
+  and both catalogs to the generated Nuvio Football collection folder.
+
 ## 0.44.4
 
 ### Collection copy compatibility

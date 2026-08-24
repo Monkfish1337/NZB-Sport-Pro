@@ -124,14 +124,30 @@ async function refreshPromotion(promotion, log) {
       log('  football-data: no API key configured (set on /admin or via FOOTBALL_DATA_API_KEY env) — skipping ' + promotion.id);
       return { ok: true };
     }
-    const seasons = activeSeasons();
-    log('  football-data competition: ' + promotion.source.competitionId + ' seasons: ' + seasons.join(', '));
-    raw = await footballData.fetchAll({
-      competitionId: promotion.source.competitionId,
-      seasons,
-      apiKey: fd.apiKey,
-      log,
-    });
+    if (promotion.source.teamId) {
+      const today = new Date(); today.setUTCHours(0, 0, 0, 0);
+      const from = new Date(today); from.setUTCDate(from.getUTCDate() - Math.max(0, config.eventWindowDaysBack | 0));
+      const to = new Date(today); to.setUTCDate(to.getUTCDate() + Math.max(0, config.eventWindowDaysAhead | 0));
+      const dateFrom = from.toISOString().slice(0, 10);
+      const dateTo = to.toISOString().slice(0, 10);
+      log('  football-data team: ' + promotion.source.teamId + ' range: ' + dateFrom + ' to ' + dateTo);
+      raw = await footballData.fetchTeamMatches({
+        teamId: promotion.source.teamId,
+        dateFrom,
+        dateTo,
+        apiKey: fd.apiKey,
+        log,
+      });
+    } else {
+      const seasons = activeSeasons();
+      log('  football-data competition: ' + promotion.source.competitionId + ' seasons: ' + seasons.join(', '));
+      raw = await footballData.fetchAll({
+        competitionId: promotion.source.competitionId,
+        seasons,
+        apiKey: fd.apiKey,
+        log,
+      });
+    }
   } else if (promotion.source.type === 'tmdb') {
     // 0.42.13: TMDB TV show. Fetches all episodes with air dates. Each becomes
     // an event whose date drives DARKSPORT-style search title generation.
