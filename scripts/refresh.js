@@ -143,12 +143,20 @@ async function refreshPromotion(promotion, log) {
     const tvIds = Array.isArray(promotion.source.tvIds) && promotion.source.tvIds.length
       ? promotion.source.tvIds
       : [promotion.source.tvId];
+    const sourceRange = typeof promotion.sourceDateRange === 'function'
+      ? promotion.sourceDateRange()
+      : {};
+    if (sourceRange.dateFrom || sourceRange.dateTo) {
+      log('  tmdb episode range: ' + (sourceRange.dateFrom || 'open') + ' to ' + (sourceRange.dateTo || 'open'));
+    }
     for (const tvId of tvIds) {
       log('  tmdb tvId: ' + tvId);
       const episodes = await tmdb.fetchAll({
         tvId,
         apiKey: tk,
         log,
+        dateFrom: sourceRange.dateFrom,
+        dateTo: sourceRange.dateTo,
       });
       raw.push(...episodes);
     }

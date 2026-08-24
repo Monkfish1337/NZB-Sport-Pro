@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.43.5
+
+### Match of the Day catalog lifecycle
+
+- Split Match of the Day into Upcoming and Recent catalogs, following the
+  same air-date transition and sort behavior as other SSS promotions.
+- Limited retained and displayed episodes to the active July-June football
+  season so old weekly episodes are pruned at refresh time.
+- Added branded Match of the Day fallback artwork for episodes whose TMDB
+  metadata has no still image.
+
 ## 0.43.4
 
 ### Refresh failure reporting
