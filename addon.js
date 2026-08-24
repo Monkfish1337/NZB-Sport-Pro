@@ -26,6 +26,7 @@ const powerTool = require('./lib/power-tool');
 // use tablerChrome.tablerPage().
 const tablerChrome = require('./lib/tabler-chrome');
 const { cleanOrder, orderByIds } = require('./lib/catalog-order');
+const { buildNuvioCollections } = require('./lib/nuvio-collections');
 const APP_VERSION = require('./package.json').version || '?';
 
 
@@ -273,6 +274,17 @@ function createApp() {
   app.get('/account', requireLogin, (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(renderAccountPage(req.user, { flash: req.query.flash || null, origin: publicOriginFromReq(req) }));
+  });
+
+  app.get('/account/nuvio-collections.json', requireLogin, (req, res) => {
+    const payload = buildNuvioCollections({
+      user: req.user,
+      origin: publicOriginFromReq(req),
+    });
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="serioussportsync-nuvio-collections.json"');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(JSON.stringify(payload, null, 2));
   });
 
   app.post('/account/save', requireLogin, (req, res) => {
@@ -2049,6 +2061,18 @@ function renderAccountPage(user, opts) {
     + '</div>'
 
     + '<div class="card mb-3">'
+    +   '<div class="card-header"><h3 class="card-title">Nuvio collection</h3></div>'
+    +   '<div class="card-body">'
+    +     '<p class="text-secondary small mb-3">Generate an import-ready SSS collection with Combat Sports, Wrestling, Football, and Motorsport folders. It uses your enabled catalogs and saved catalog order, so save settings before exporting.</p>'
+    +     '<div class="d-flex flex-wrap gap-2 align-items-center">'
+    +       '<a class="btn btn-primary" href="/account/nuvio-collections.json" download>Download JSON</a>'
+    +       '<button class="btn btn-outline-primary" type="button" id="copyNuvioJsonBtn">Copy JSON</button>'
+    +       '<span class="text-secondary small" id="copyNuvioJsonStatus" aria-live="polite"></span>'
+    +     '</div>'
+    +   '</div>'
+    + '</div>'
+
+    + '<div class="card mb-3">'
     +   '<div class="card-header"><h3 class="card-title">API token</h3></div>'
     +   '<div class="card-body">'
     +     '<p class="text-secondary small mb-3">If your install URL leaks, regenerate this token. Your existing Stremio install stops working immediately; you\'ll need to reinstall with the new URL.</p>'
@@ -2097,6 +2121,10 @@ function renderAccountPage(user, opts) {
     +     'if (navigator.clipboard) { navigator.clipboard.writeText(t); }'
     +     'btn.textContent = "Copied!"; setTimeout(function(){ btn.textContent = "Copy"; }, 1800);'
     +   '});'
+    + '})();'
+    + '(function(){'
+    +   'var btn=document.getElementById("copyNuvioJsonBtn"),status=document.getElementById("copyNuvioJsonStatus");if(!btn)return;'
+    +   'btn.addEventListener("click",function(){btn.disabled=true;if(status)status.textContent="Preparing…";fetch("/account/nuvio-collections.json",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.text();}).then(function(json){if(!navigator.clipboard||!navigator.clipboard.writeText)throw new Error("Clipboard unavailable — use Download JSON");return navigator.clipboard.writeText(json);}).then(function(){if(status)status.textContent="Copied — paste into Nuvio Collections import.";}).catch(function(err){if(status)status.textContent=err.message;}).finally(function(){btn.disabled=false;});});'
     + '})();'
     + 'document.addEventListener("click", function(e){'
     +   'var a = e.target && e.target.closest ? e.target.closest(".btn-reveal") : null;'

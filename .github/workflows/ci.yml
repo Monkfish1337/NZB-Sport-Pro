@@ -53,12 +53,12 @@ jobs:
               './config',
               './lib/promotions',
               './lib/manifest',
+              './lib/nuvio-collections',
               './lib/streams',
               './lib/catalog',
               './lib/meta',
               './lib/transform',
               './lib/store',
-              './lib/streamcache',
               './lib/rd-denylist',
               './lib/tb-denylist',
               './lib/pm-denylist',
@@ -96,6 +96,9 @@ jobs:
             }
             console.log('OK — all modules load, promotion registry well-formed (' + p.enabled.length + ' enabled).');
           "
+
+      - name: Nuvio collections generator tests
+        run: npm run test:nuvio
 
   docker:
     name: Docker Compose smoke test

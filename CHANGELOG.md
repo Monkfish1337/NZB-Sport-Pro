@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.44.0
+
+### Nuvio collections export
+
+- Added an account download that generates Nuvio's native collections JSON
+  schema for the user's enabled SSS catalogs and saved ordering.
+- Added Combat Sports (UFC, ONE, Boxing), Wrestling (WWE, AEW), Football
+  (Match of the Day), and Motorsport (Formula 1, MotoGP) folders.
+- Added Download JSON and Copy JSON actions for Nuvio website and app imports,
+  using public SSS artwork URLs and stable collection/folder identifiers.
+- Removed the retired stream-cache module from CI's module-load list.
+
 ## 0.43.9
 
 ### Catalog ordering UI fix
