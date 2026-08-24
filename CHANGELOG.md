@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.45.3
+
+### Manchester United torrent discovery
+
+- Made the companion and direct Prowlarr use one precise Manchester United
+  fixture query in scene order: `competition + date + teams`.
+- Removed HCAFC, nickname, `@`, date-last, and undated variants from the
+  Manchester United torrent path while retaining UU's optimized fallbacks.
+
 ## 0.45.2
 
 ### Manchester United UU search latency

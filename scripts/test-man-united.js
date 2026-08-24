@@ -56,6 +56,11 @@ assert.strictEqual(
   'prioritises the most precise football scene query for bounded providers',
 );
 assert.strictEqual(promo.uuMaxQueries, 4, 'limits UU fan-out for team fixtures');
+assert.deepStrictEqual(
+  promo.torrentSearchTitles(event),
+  ['EPL 2026 08 22 Hull City Vs Manchester United'],
+  'sends only the proven precise fixture query to Prowlarr and the companion',
+);
 assert.strictEqual(
   promo.includeEvent({ name: 'Hull City vs Manchester City' }),
   false,
