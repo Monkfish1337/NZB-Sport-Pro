@@ -61,6 +61,7 @@ for (const folder of all[0].folders) {
 
 const personalised = build({
   catalogs: ['aew-recent', 'wwe-upcoming', 'f1-race'],
+  catalogDefaultsVersion: 1,
   promotionOrder: ['aew', 'wwe', 'f1'],
   catalogOrder: ['aew-recent', 'wwe-upcoming', 'f1-race'],
 });
@@ -80,11 +81,39 @@ assert.deepStrictEqual(
   'exports only enabled catalogs',
 );
 
+const legacySelection = build({
+  catalogs: ['motd', 'motd-upcoming'],
+});
+const migratedFootball = legacySelection[0].folders.find((folder) => folder.title === 'Football');
+assert.deepStrictEqual(
+  catalogIds(migratedFootball),
+  ['motd-upcoming', 'motd', 'manutd-upcoming', 'manutd-recent'],
+  'adds new Manchester United catalogs once for legacy explicit selections',
+);
+
+const savedModernSelection = build({
+  catalogs: ['motd', 'motd-upcoming'],
+  catalogDefaultsVersion: 1,
+});
+assert.deepStrictEqual(
+  catalogIds(savedModernSelection[0].folders.find((folder) => folder.title === 'Football')),
+  ['motd-upcoming', 'motd'],
+  'respects a modern account that explicitly disables Manchester United catalogs',
+);
+
 const defaultManifest = buildManifest({ user: { config: {} } });
 assert.ok(defaultManifest.catalogs.length > 0, 'existing users keep home catalog rows by default');
 assert.ok(
   defaultManifest.catalogs.every((catalog) => catalog.showInHome === true),
   'default manifest marks every registered catalog for Home',
+);
+const migratedManifest = buildManifest({
+  user: { config: { catalogs: ['motd', 'motd-upcoming'] } },
+});
+assert.deepStrictEqual(
+  migratedManifest.catalogs.map((catalog) => catalog.id),
+  ['motd-upcoming', 'motd', 'manutd-upcoming', 'manutd-recent'],
+  'legacy private manifests receive the new catalogs automatically',
 );
 assert.ok(
   defaultManifest.catalogs.every((catalog) => catalog.extra.every((extra) => !extra.isRequired)),

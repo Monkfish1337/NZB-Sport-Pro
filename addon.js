@@ -26,6 +26,7 @@ const powerTool = require('./lib/power-tool');
 // use tablerChrome.tablerPage().
 const tablerChrome = require('./lib/tabler-chrome');
 const { cleanOrder, orderByIds } = require('./lib/catalog-order');
+const { effectiveCatalogSelection, CURRENT_DEFAULTS_VERSION } = require('./lib/catalog-selection');
 const { buildNuvioCollections } = require('./lib/nuvio-collections');
 const APP_VERSION = require('./package.json').version || '?';
 
@@ -320,6 +321,7 @@ function createApp() {
         easynewsUsername: String(b.easynewsUsername || '').trim(),
         easynewsPassword: String(b.easynewsPassword || ''),
         catalogs: finalCats,
+        catalogDefaultsVersion: CURRENT_DEFAULTS_VERSION,
         showCatalogsOnHome: b.showCatalogsOnHome === 'on' || b.showCatalogsOnHome === '1' || b.showCatalogsOnHome === 'true',
         promotionOrder: cleanOrder(b.promotionOrder, allPromotionIds),
         catalogOrder: cleanOrder(b.catalogOrder, allCatalogIds),
@@ -1922,8 +1924,9 @@ function renderAccountPage(user, opts) {
   const installPath = '/u/' + user.id + '/' + apiToken + '/manifest.json';
   const installUrl = (opts.origin || '') + installPath;
   const nuvioJson = JSON.stringify(buildNuvioCollections({ user, origin: opts.origin }), null, 2);
-  const selected = new Set(Array.isArray(cfg.catalogs) ? cfg.catalogs : []);
-  const selectAll = selected.size === 0;
+  const effectiveSelection = effectiveCatalogSelection(cfg);
+  const selected = effectiveSelection || new Set();
+  const selectAll = effectiveSelection === null;
   const orderedPromotions = orderByIds(promotions.enabled, cfg.promotionOrder, (p) => p.id);
 
   // Per-promotion catalog tickboxes. Both levels follow the user's saved

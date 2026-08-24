@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.45.1
+
+### New-catalog account migration
+
+- Automatically enabled the two Manchester United catalogs once for accounts
+  that saved an explicit catalog list before version 0.45.0.
+- Preserved the ability to disable either catalog after the migrated account
+  settings are saved.
+
 ## 0.45.0
 
 ### Manchester United catalogs
