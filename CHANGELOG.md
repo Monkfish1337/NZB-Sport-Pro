@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.43.7
+
+### Scene-title keyword matching
+
+- Fixed UU results such as `Match.Of.The.Day.2026.08.23` being rejected as
+  `no-keyword-match` when promotion keywords contained spaces.
+- Phrase matching now treats dots, underscores, and hyphens as word separators
+  while preserving date-strict event validation.
+
 ## 0.43.6
 
 ### Remove proactive stream warming
