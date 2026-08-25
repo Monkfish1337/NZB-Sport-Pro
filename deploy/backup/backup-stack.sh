@@ -15,8 +15,15 @@ OUTPUT="${BACKUP_ROOT}/nzb-sport-pro-data-${STAMP}.tar.gz"
 cleanup() { rm -rf -- "${STAGE}"; }
 trap cleanup EXIT
 
-if [[ ! -f "${STACK_DIR}/docker-compose.yml" ]]; then
-  echo "ERROR: ${STACK_DIR}/docker-compose.yml was not found." >&2
+COMPOSE_FILE=""
+for candidate in compose.yaml compose.yml docker-compose.yaml docker-compose.yml; do
+  if [[ -f "${STACK_DIR}/${candidate}" ]]; then
+    COMPOSE_FILE="${candidate}"
+    break
+  fi
+done
+if [[ -z "${COMPOSE_FILE}" ]]; then
+  echo "ERROR: no Compose file was found in ${STACK_DIR}." >&2
   exit 1
 fi
 
@@ -39,22 +46,22 @@ fi
 
 tar -tzf "${DATA_ARCHIVE}" >/dev/null
 sha256sum "${DATA_ARCHIVE}" > "${STAGE}/nzb-sport-pro-backup/SHA256SUMS"
-cat > "${STAGE}/nzb-sport-pro-backup/RESTORE.md" <<'RESTORE'
+cat > "${STAGE}/nzb-sport-pro-backup/RESTORE.md" <<RESTORE
 # NZB-Sport-Pro data restore
 
-This archive intentionally does not contain `.env` or `SESSION_SECRET`.
+This archive intentionally does not contain \`.env\` or \`SESSION_SECRET\`.
 Recover the exact original environment from its separate secret backup first.
 
-1. Extract this outer archive and run `sha256sum -c SHA256SUMS`.
-2. From the directory with `docker-compose.yml` and the recovered `.env`, run
-   `docker compose stop nzb-sport-pro`.
+1. Extract this outer archive and run \`sha256sum -c SHA256SUMS\`.
+2. From the directory with the Compose file and recovered \`.env\`, run
+   \`docker compose stop ${SERVICE}\`.
 3. Restore only into a new or deliberately emptied data volume:
-   `docker compose run --rm --no-deps -T --entrypoint sh nzb-sport-pro -c 'tar -xzf - -C /app/data' < data.tar.gz`
-4. Run `docker compose up -d nzb-sport-pro`.
-5. Verify `https://YOUR-HOST/health` reports `ok: true` before reopening use.
+   \`docker compose run --rm --no-deps -T --entrypoint sh ${SERVICE} -c 'tar -xzf - -C /app/data' < data.tar.gz\`
+4. Run \`docker compose up -d ${SERVICE}\`.
+5. Verify \`https://YOUR-HOST/health\` reports \`ok: true\` before reopening use.
 
 Do not extract over a running or populated volume. A mismatched SESSION_SECRET
-makes encrypted configurations unreadable and `/health` return HTTP 503.
+makes encrypted configurations unreadable and \`/health\` return HTTP 503.
 RESTORE
 
 tar -czf "${OUTPUT}" -C "${STAGE}" nzb-sport-pro-backup

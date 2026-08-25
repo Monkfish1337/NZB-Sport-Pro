@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.12
+
+### Dockge backup compatibility
+
+- Accepted all standard Compose filenames when installing or running backups.
+- Wrote the configured Compose service name into each archive's restore guide.
+
 ## 0.4.11
 
 ### Dockge Compose discovery

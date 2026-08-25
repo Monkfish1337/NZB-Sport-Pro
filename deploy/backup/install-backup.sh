@@ -8,8 +8,15 @@ BACKUP_ROOT="${NZB_BACKUP_ROOT:-/mnt/storage/backups/nzb-sport-pro}"
 KEEP_COUNT="${NZB_BACKUP_KEEP_COUNT:-14}"
 SERVICE="${NZB_COMPOSE_SERVICE:-nzb-sport-pro}"
 
-if [[ ! -f "${STACK_DIR}/docker-compose.yml" ]]; then
-  echo "ERROR: run from the NZB-Sport-Pro stack directory or set NZB_STACK_DIR." >&2
+COMPOSE_FILE=""
+for candidate in compose.yaml compose.yml docker-compose.yaml docker-compose.yml; do
+  if [[ -f "${STACK_DIR}/${candidate}" ]]; then
+    COMPOSE_FILE="${candidate}"
+    break
+  fi
+done
+if [[ -z "${COMPOSE_FILE}" ]]; then
+  echo "ERROR: no Compose file was found in ${STACK_DIR}; set NZB_STACK_DIR to the stack directory." >&2
   exit 1
 fi
 
