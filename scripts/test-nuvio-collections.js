@@ -23,7 +23,7 @@ function build(userConfig) {
 const all = build();
 assert.strictEqual(all.length, 1, 'exports exactly one SSS collection');
 assert.strictEqual(all[0].id, COLLECTION_ID, 'uses the stable collection ID');
-assert.strictEqual(all[0].title, 'SeriousSportSync', 'uses the full product name');
+assert.strictEqual(all[0].title, 'NZB-Sport-Pro', 'uses the full product name');
 assert.deepStrictEqual(
   all[0].folders.map((folder) => folder.title),
   FOLDERS.map((folder) => folder.title),

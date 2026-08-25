@@ -10,10 +10,10 @@ function enabled(v) {
   return /^(1|true|yes|on)$/i.test(String(v || ''));
 }
 
-// Native per-user Newznab -> TorBox Usenet is intentionally isolated from
-// the stable release. Enabling it gives the addon a distinct manifest ID and
-// name so an experimental install can coexist with SeriousSportSync stable.
-const experimentalNativeNewznab = enabled(process.env.EXPERIMENTAL_NATIVE_NEWZNAB);
+// Native per-user Newznab -> TorBox Usenet is the product's primary pipeline.
+// Keep the legacy property name while shared stream modules are gradually
+// extracted from SeriousSportSync.
+const experimentalNativeNewznab = true;
 
 // TSDB_SEASONS handling: 'auto' (or unset/empty) -> derived from the event
 // window at runtime so we only hit TSDB for years that actually overlap
@@ -34,16 +34,13 @@ module.exports = {
 
   addonType: process.env.ADDON_TYPE || 'movie',
 
-  addonId: experimentalNativeNewznab
-    ? 'community.serioussportsync.experimental'
-    : 'community.serioussportsync',
-  addonName: experimentalNativeNewznab
-    ? 'SeriousSportSync Experimental'
-    : 'SeriousSportSync',
-  addonDescription: experimentalNativeNewznab
-    ? 'Experimental SeriousSportSync build with opt-in native per-user Newznab to TorBox Usenet playback.'
-    : 'Self-hosted sports event metadata and calendar for Stremio/Nuvio, with optional TorBox, Usenet Ultimate, and Easynews playback pipelines.',
+  addonId: 'community.nzbsportpro',
+  addonName: 'NZB-Sport-Pro',
+  addonDescription: 'Sports event metadata with private per-user Newznab discovery and TorBox Usenet playback.',
   experimentalNativeNewznab,
+  publicRegistration: process.env.PUBLIC_REGISTRATION === undefined
+    ? true
+    : enabled(process.env.PUBLIC_REGISTRATION),
 
   idPrefix: 'ufc',
 

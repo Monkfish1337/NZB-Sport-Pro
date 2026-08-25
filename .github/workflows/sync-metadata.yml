@@ -1,0 +1,55 @@
+name: Sync SeriousSportSync metadata
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: metadata-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout NZB-Sport-Pro
+        uses: actions/checkout@v4
+        with:
+          path: product
+
+      - name: Checkout canonical SeriousSportSync metadata
+        uses: actions/checkout@v4
+        with:
+          repository: Monkfish1337/Serioussportsync
+          ref: main
+          path: source
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Sync the declared metadata boundary
+        run: node product/scripts/sync-metadata.js source product
+
+      - name: Verify synced product
+        working-directory: product
+        env:
+          SESSION_SECRET: ci-only-do-not-use-in-prod-0000000000000000000000000000000000
+        run: |
+          npm ci --no-audit --no-fund
+          npm run test:manutd
+          npm run test:native-newznab
+
+      - name: Commit metadata update
+        working-directory: product
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name "nzb-sport-pro-sync[bot]"
+          git config user.email "nzb-sport-pro-sync[bot]@users.noreply.github.com"
+          git add --all
+          git commit -m "Sync SeriousSportSync metadata"
+          git push

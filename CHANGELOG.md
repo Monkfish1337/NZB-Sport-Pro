@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.0
+
+### Standalone public product split
+
+- Split the native Newznab to TorBox Usenet work into NZB-Sport-Pro with its
+  own addon identity, repository, container and release lifecycle.
+- Added a Comet-style public landing, registration and private configuration
+  flow while retaining an operator-only initial setup.
+- Focused the user interface on TorBox and personal Newznab indexers; the
+  SeriousSportSync stable release remains unchanged.
+- Added a declared metadata boundary and six-hour workflow that imports and
+  tests canonical metadata updates from SeriousSportSync main.
+- Retained explicit owned/instant and click-to-queue behaviour without
+  claiming reliable global TorBox Usenet cache detection.
+
 ## 0.46.0-experimental.6
 
 ### Expanded TorBox Usenet cache coverage

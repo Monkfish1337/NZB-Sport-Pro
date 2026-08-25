@@ -30,6 +30,7 @@ const { effectiveCatalogSelection, CURRENT_DEFAULTS_VERSION } = require('./lib/c
 const { buildNuvioCollections } = require('./lib/nuvio-collections');
 const torboxVoyager = require('./lib/sources/torbox-voyager');
 const nativeNewznab = require('./lib/sources/native-newznab');
+const publicPage = require('./lib/public-page');
 const APP_VERSION = require('./package.json').version || '?';
 
 
@@ -245,6 +246,31 @@ function createApp() {
     ));
   });
 
+  app.get('/configure', (req, res) => {
+    if (req.user) return res.redirect('/account');
+    if (users.userCount() === 0) return res.redirect('/setup');
+    if (!config.publicRegistration) return res.redirect('/login');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    return res.send(publicPage.registrationPage());
+  });
+
+  app.post('/configure', async (req, res) => {
+    if (req.user) return res.redirect('/account');
+    if (users.userCount() === 0) return res.redirect('/setup');
+    if (!config.publicRegistration) return res.status(403).send('Public registration is disabled.');
+    const username = String((req.body && req.body.username) || '').trim();
+    const password = String((req.body && req.body.password) || '');
+    try {
+      const user = await users.createUser({ username, password, role: 'user' });
+      sessions.setCookie(res, user.id, req);
+      return res.redirect('/account?flash=' + encodeURIComponent('Configuration created. Add TorBox and Newznab below.'));
+    } catch (err) {
+      res.status(400).setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.send(publicPage.registrationPage({ error: err.message, username }));
+    }
+  });
+
   app.post('/login', async (req, res) => {
     const username = String(req.body.username || '').trim();
     const password = String(req.body.password || '');
@@ -302,7 +328,7 @@ function createApp() {
       origin: publicOriginFromReq(req),
     });
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="serioussportsync-nuvio-collections.json"');
+    res.setHeader('Content-Disposition', 'attachment; filename="nzb-sport-pro-nuvio-collections.json"');
     res.setHeader('Cache-Control', 'no-store');
     res.send(JSON.stringify(payload, null, 2));
   });
@@ -1255,15 +1281,14 @@ function createApp() {
 
   app.use('/u/:userId/:apiToken', buildUserAddonRouter());
 
-  // Root URL is the entry point. Anonymous visitors land on /login (or
-  // /setup if the install is brand-new and has no users yet). Authenticated
-  // users go straight to their /account page. There is no anonymous catalog
-  // browsing in this version — all addon access is per-user via the
-  // /u/:userId/:apiToken/* routes mounted above.
+  // Public product landing page. The operator still completes /setup first;
+  // after that, visitors can create isolated configurations when public
+  // registration is enabled.
   app.get('/', (req, res) => {
     if (req.user) return res.redirect('/account');
     if (users.userCount() === 0) return res.redirect('/setup');
-    return res.redirect('/login');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send(publicPage.landingPage({ registrationOpen: config.publicRegistration }));
   });
 
   return app;
@@ -2061,67 +2086,29 @@ function renderAccountPage(user, opts) {
     +   '<button class="btn btn-sm btn-outline-danger mt-2 newznab-remove" type="button">Remove indexer</button>'
     + '</div>').join('');
   const nativeNewznabCard = config.experimentalNativeNewznab ? ''
-    + '<div class="alert alert-warning" role="alert"><strong>Experimental install:</strong> native Newznab is isolated behind a distinct addon ID. It does not replace or alter SeriousSportSync stable.</div>'
     + '<div class="card mb-3 border-warning">'
-    +   '<div class="card-header"><h3 class="card-title">Native Newznab → TorBox Usenet <span class="badge bg-warning text-dark">Experimental</span></h3></div>'
+    +   '<div class="card-header"><h3 class="card-title">Newznab → TorBox Usenet <span class="badge bg-warning text-dark">Core pipeline</span></h3></div>'
     +   '<div class="card-body">'
     +     pipelineSwitch('nativeNewznabEnabled', cfg.nativeNewznabEnabled === true,
-            'Enable native Newznab pipeline', 'Check TorBox shared cache and show separate instant-play and click-to-queue rows.')
+            'Enable Newznab pipeline', 'Search your indexers and show separate instant-play and explicit queue rows.')
     +     pipelineSwitch('nativeNewznabDirectLinkEnabled', cfg.nativeNewznabDirectLinkEnabled === true,
             'Allow direct TorBox indexer-link attachment', 'For a clicked shared-cache result matched by its link, send its credential-bearing NZB download URL (including your indexer API key) to TorBox. This may avoid TorBox file-upload attach delays. Disabled by default.')
-    +     '<p class="text-secondary small">API keys are encrypted at rest. SSS fetches only the top relevant NZBs into bounded, expiring memory for a batched cache check; links and bytes never reach the client or disk. Cached rows attach in cached-only mode, while uncached content enters your TorBox account only after its Queue row is clicked. Public HTTPS indexers are required by default.</p>'
+    +     '<p class="text-secondary small">API keys are encrypted at rest. NZB-Sport-Pro fetches only relevant NZBs into bounded, expiring memory; links and bytes never reach the client or disk. Existing TorBox jobs play immediately, while new content enters your account only after its Queue row is clicked. Public HTTPS indexers are required.</p>'
     +     '<div id="newznab-indexers">' + newznabRows + '</div>'
     +     '<button class="btn btn-outline-primary btn-sm" id="newznab-add" type="button">Add indexer</button>'
     +     '<span class="text-secondary small ms-2">Maximum ' + nativeNewznab.MAX_INDEXERS + '</span>'
     +   '</div>'
     + '</div>' : '';
 
-  // Services tab — credentials for each provider.
+  // Services tab — deliberately focused on the single native Usenet path.
   const servicesTab = ''
     + '<div class="card mb-3">'
     +   '<div class="card-header"><h3 class="card-title">TorBox</h3></div>'
     +   '<div class="card-body">'
-    +     '<p class="text-secondary small mb-3">Used by the addon to check which scraper results are already cached on your TorBox subscription, and to return playable URLs only for cached items. Your key never leaves this addon.</p>'
-    +     pipelineSwitch('torboxEnabled', cfg.torboxEnabled !== false,
-            'Enable TorBox torrent pipeline', 'Use companion/Prowlarr torrent results with this TorBox account.')
+    +     '<p class="text-secondary small mb-3">Your TorBox API key is used to inspect your Usenet library, queue selected NZBs and request final playback links. It is encrypted at rest and never returned to the client.</p>'
     +     secretField('TorBox API key', 'torboxApiKey', cfg.torboxApiKey, 'paste your TorBox API key')
-    +     '<hr class="my-3">'
-    +     '<p class="text-secondary small mb-2"><strong>TorBox Unified diagnostic</strong> — read-only test of Voyager torrent, Usenet, cache, ownership, and your TorBox BYOI sources. This does not add anything to your account.</p>'
-    +     '<div class="input-group mb-2">'
-    +       '<input class="form-control text-mono" type="text" id="torbox-unified-query" value="EPL 2026 08 22 Hull City Vs Manchester United" maxlength="200">'
-    +       '<button class="btn btn-outline-primary" type="button" id="torbox-unified-probe">Test unified search</button>'
-    +     '</div>'
-    +     '<pre class="bg-dark text-light rounded p-3 mb-0 text-wrap" id="torbox-unified-output" style="display:none;max-height:420px;overflow:auto;font-size:12px;"></pre>'
     +   '</div>'
     + '</div>'
-
-    + '<div class="card mb-3">'
-    +   '<div class="card-header"><h3 class="card-title">Easynews</h3></div>'
-    +   '<div class="card-body">'
-    +     '<p class="text-secondary small mb-3">Stream rows will play directly from members.easynews.com using your subscription. Your password is encrypted at rest and never appears in stream URLs returned to Stremio (auth is injected only at play-time via a signed redirect). Leave blank if you don\'t have an Easynews subscription.</p>'
-    +     pipelineSwitch('easynewsEnabled', cfg.easynewsEnabled !== false,
-            'Enable Easynews pipeline', 'Search and play using the saved Easynews account.')
-    +     '<div class="mb-3">'
-    +       '<label class="form-label" for="en-user">Easynews username</label>'
-    +       '<input class="form-control" type="text" id="en-user" name="easynewsUsername" value="' + escapeHtml(cfg.easynewsUsername || '') + '" placeholder="your Easynews username" autocomplete="off">'
-    +     '</div>'
-    +     secretField('Easynews password', 'easynewsPassword', cfg.easynewsPassword, 'your Easynews password')
-    +   '</div>'
-    + '</div>'
-
-    + '<div class="card mb-3">'
-    +   '<div class="card-header"><h3 class="card-title">Usenet Ultimate</h3></div>'
-    +   '<div class="card-body">'
-    +     '<p class="text-secondary small mb-3">Stream rows will play through your UU instance. Leave blank if you don\'t use UU.</p>'
-    +     pipelineSwitch('uuEnabled', cfg.uuEnabled !== false,
-            'Enable Usenet Ultimate pipeline', 'Search and play through the saved UU manifest.')
-    +     '<div class="mb-3">'
-    +       '<label class="form-label" for="uu-url">UU manifest URL</label>'
-    +       '<input class="form-control text-mono" type="url" id="uu-url" name="uuManifestUrl" value="' + escapeHtml(cfg.uuManifestUrl || '') + '" placeholder="https://your-usenet-ultimate.elfhosted.com/stremio/&lt;config&gt;/manifest.json">'
-    +     '</div>'
-    +   '</div>'
-    + '</div>'
-
     + nativeNewznabCard
 
     + '<div class="card mb-3">'
@@ -2132,19 +2119,6 @@ function renderAccountPage(user, opts) {
     +       '<label class="form-label">Max streams (0 = default)</label>'
     +       '<input class="form-control" type="number" name="maxStreams" min="0" max="50" value="' + escapeHtml(String(cfg.maxStreams || 0)) + '" style="max-width:140px;">'
     +     '</div>'
-    +   '</div>'
-    + '</div>'
-
-    // 0.38.0: warm-to-cache toggle. Default ON so new users get the helpful
-    // 🔥 rows automatically; opt-out for users who prefer cached-only rows.
-    + '<div class="card mb-3">'
-    +   '<div class="card-header"><h3 class="card-title">Warm to TorBox</h3></div>'
-    +   '<div class="card-body">'
-    +     '<p class="text-secondary small mb-3">When a release isn\'t already cached on your TorBox, show a 🔥 row that submits it for caching when clicked. Plays a brief "added — check back in 2-5 min" placeholder; come back once it\'s cached. Turn off if you prefer to only see ready-to-play rows.</p>'
-    +     '<label class="form-check form-switch">'
-    +       '<input class="form-check-input" type="checkbox" name="showWarmRows" value="on"' + ((cfg.showWarmRows !== false) ? ' checked' : '') + '>'
-    +       '<span class="form-check-label">Show warm-to-cache rows for uncached releases</span>'
-    +     '</label>'
     +   '</div>'
     + '</div>';
 
@@ -2190,7 +2164,7 @@ function renderAccountPage(user, opts) {
     + '<div class="card mb-3">'
     +   '<div class="card-header"><h3 class="card-title">Nuvio collection</h3></div>'
     +   '<div class="card-body">'
-    +     '<p class="text-secondary small mb-3">Generate an import-ready SSS collection with Combat Sports, Wrestling, Football, and Motorsport folders. It uses your enabled catalogs and saved catalog order, so save settings before exporting.</p>'
+    +     '<p class="text-secondary small mb-3">Generate an import-ready NZB-Sport-Pro collection with Combat Sports, Wrestling, Football, and Motorsport folders. It uses your enabled catalogs and saved catalog order, so save settings before exporting.</p>'
     +     '<div class="d-flex flex-wrap gap-2 align-items-center">'
     +       '<a class="btn btn-primary" href="/account/nuvio-collections.json" download>Download JSON</a>'
     +       '<button class="btn btn-outline-primary" type="button" id="copyNuvioJsonBtn">Copy JSON</button>'
@@ -2217,7 +2191,7 @@ function renderAccountPage(user, opts) {
     + '<div class="page-header d-print-none">'
     +   '<div class="row align-items-center">'
     +     '<div class="col">'
-    +       '<h2 class="page-title">Account</h2>'
+    +       '<h2 class="page-title">Configure NZB-Sport-Pro</h2>'
     +     '</div>'
     +   '</div>'
     + '</div>'
