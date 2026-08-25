@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.11
+
+### Dockge Compose discovery
+
+- Recognized `compose.yaml`, `compose.yml`, `docker-compose.yaml`, and
+  `docker-compose.yml` during public-host preflight checks.
+
 ## 0.4.10
 
 ### Flexible Compose topology

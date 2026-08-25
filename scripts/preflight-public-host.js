@@ -59,10 +59,11 @@ for (const name of [
   if (/^(1|true|yes|on)$/i.test(value(name))) errors.push(name + ' must be disabled for public hosting.');
 }
 
-const composePath = path.resolve('docker-compose.yml');
-if (!fs.existsSync(composePath)
+const composePath = ['compose.yaml', 'compose.yml', 'docker-compose.yaml', 'docker-compose.yml']
+  .map((name) => path.resolve(name)).find((file) => fs.existsSync(file));
+if (!composePath
     || !/127\.0\.0\.1:[0-9]{1,5}:7000/.test(fs.readFileSync(composePath, 'utf8'))) {
-  errors.push('docker-compose.yml must bind container port 7000 to a 127.0.0.1 host port only.');
+  errors.push('The Compose file must bind container port 7000 to a 127.0.0.1 host port only.');
 }
 if (fs.existsSync(envPath) && process.platform !== 'win32') {
   const mode = fs.statSync(envPath).mode & 0o777;
