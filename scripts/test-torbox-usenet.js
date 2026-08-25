@@ -97,6 +97,23 @@ async function main() {
     data: { [expectedHash]: { hash: expectedHash } },
   }, [expectedHash, torboxUsenet.nzbHash(uncachedNzb)]);
   assert.deepStrictEqual(Array.from(batch), [expectedHash]);
+  const manyHashes = Array.from({ length: 150 }, (_, index) => require('crypto')
+    .createHash('md5').update('expanded-cache-' + index).digest('hex'));
+  let expandedCount = 0;
+  const expanded = await torboxUsenet.checkCachedMany(
+    manyHashes, 'torbox-key-expanded', () => {}, {
+      maxHashes: 2000,
+      fetchImpl: async (_url, options) => {
+        const submitted = JSON.parse(options.body).hashes;
+        expandedCount = submitted.length;
+        return response(200, { data: {
+          [submitted[submitted.length - 1]]: { hash: submitted[submitted.length - 1] },
+        } });
+      },
+    }
+  );
+  assert.strictEqual(expandedCount, 150, 'POST cache check is no longer truncated to GET limit');
+  assert.ok(expanded.has(manyHashes[manyHashes.length - 1]));
   const owned = torboxUsenet.ownedReadyHashesFromPayload({ data: [{
     id: 99,
     hash: rawHash,

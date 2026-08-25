@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.46.0-experimental.6
+
+### Expanded TorBox Usenet cache coverage
+
+- Expanded the native Newznab TorBox POST cache check from 100 hashes to a
+  conservative 2,000-hash cap so first-message IDs from substantially more NZB
+  files can participate in shared-cache matching.
+- Preserved fair interleaving across displayed results and added the submitted
+  hash count to cache diagnostics.
+- Kept cache discovery read-only and retained owned-library fallback behavior.
+
 ## 0.46.0-experimental.5
 
 ### Link-identified TorBox cache attachment experiment
