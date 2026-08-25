@@ -6,6 +6,21 @@ process.env.NATIVE_NEWZNAB_ALLOW_HTTP = 'on';
 
 const nativeNewznab = require('../lib/sources/native-newznab');
 
+function mockResponse(body, status, headers) {
+  const bytes = Buffer.from(body || '');
+  const values = Object.fromEntries(Object.entries(headers || {})
+    .map(([key, value]) => [key.toLowerCase(), value]));
+  return {
+    status,
+    ok: status >= 200 && status < 300,
+    headers: { get: (name) => values[String(name || '').toLowerCase()] || null },
+    body: {
+      async *[Symbol.asyncIterator]() { yield bytes; },
+      destroy() {},
+    },
+  };
+}
+
 async function main() {
   let searchCount = 0;
   let leakedKey = false;
@@ -58,6 +73,50 @@ async function main() {
     const nzb = await nativeNewznab.fetchNzb(candidate);
     assert.ok(Buffer.isBuffer(nzb));
     assert.match(nzb.toString('utf8'), /<nzb>/);
+
+    assert.strictEqual(nativeNewznab._test.sameProviderHost('usenet-crawler.com', 'www.usenet-crawler.com'), true);
+    assert.strictEqual(nativeNewznab._test.sameProviderHost('api.usenet-crawler.com', 'www.usenet-crawler.com'), false);
+    assert.strictEqual(nativeNewznab._test.sameProviderHost('usenet-crawler.com', 'unrelated.example'), false);
+
+    const redirectRequests = [];
+    const redirectLogs = [];
+    const redirectedResults = await nativeNewznab.multiSearch(['redirect test'], [{
+      name: 'Redirecting Indexer',
+      url: 'http://usenet-crawler.test/api',
+      apiKey: 'redirect-key',
+    }], {
+      maxQueries: 1,
+      log: (line) => redirectLogs.push(line),
+      fetchImpl: async (requestUrl) => {
+        redirectRequests.push(requestUrl);
+        if (redirectRequests.length === 1) {
+          return mockResponse('', 301, {
+            location: requestUrl.replace('://usenet-crawler.test/', '://www.usenet-crawler.test/'),
+          });
+        }
+        return mockResponse('<?xml version="1.0"?><rss><channel><item>'
+          + '<title>Redirected release</title>'
+          + '<link>http://www.usenet-crawler.test/api?t=get&amp;id=redirected&amp;apikey=redirect-key</link>'
+          + '<guid>redirected</guid></item></channel></rss>', 200,
+        { 'Content-Type': 'application/rss+xml' });
+      },
+    });
+    assert.strictEqual(redirectRequests.length, 2);
+    assert.strictEqual(redirectedResults.length, 1, redirectLogs.join('\n'));
+    assert.match(redirectedResults[0].nzbUrl, /^http:\/\/www\.usenet-crawler\.test\/api/);
+
+    const blockedLogs = [];
+    const blockedResults = await nativeNewznab.multiSearch(['blocked redirect'], [{
+      name: 'Blocked Redirect',
+      url: 'http://indexer.test/api',
+      apiKey: 'blocked-key',
+    }], {
+      maxQueries: 1,
+      log: (line) => blockedLogs.push(line),
+      fetchImpl: async () => mockResponse('', 302, { location: 'http://unrelated.test/api' }),
+    });
+    assert.deepStrictEqual(blockedResults, []);
+    assert.ok(blockedLogs.some((line) => line.includes('cross-host-redirect-blocked')));
     console.log('native Newznab search/token/NZB tests passed');
   } finally {
     await new Promise((resolve) => server.close(resolve));
