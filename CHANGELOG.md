@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.0
+
+### Collections and honest wait-to-play states
+
+- Added first-class Nuvio collection Download and Copy JSON actions to the
+  stateless public configurator.
+- Assigned NZB-Sport-Pro its own stable collection and folder IDs so Nuvio no
+  longer merges the export with a previously imported SeriousSportSync collection.
+- Removed the obsolete direct indexer-link attachment option and always keeps
+  credential-bearing Newznab URLs out of TorBox submissions.
+- Reserved Instant Play for completed downloads already owned by the user;
+  shared-cache matches now clearly say attach-and-wait.
+- Added bounded TorBox job polling, pending-job reuse, processing rows and
+  no-store stream responses so repeated clicks and reopened events do not add
+  duplicate downloads or display stale queue state.
+- Added a normal queue fallback when TorBox reports a shared-cache hash that
+  cannot actually be attached to the user's library.
+
 ## 0.2.0
 
 ### Stateless hosted-addon configurator

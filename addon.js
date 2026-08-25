@@ -405,9 +405,6 @@ function createApp() {
       if (config.experimentalNativeNewznab) {
         servicePatch.nativeNewznabEnabled = b.nativeNewznabEnabled === 'on'
           || b.nativeNewznabEnabled === '1' || b.nativeNewznabEnabled === 'true';
-        servicePatch.nativeNewznabDirectLinkEnabled = b.nativeNewznabDirectLinkEnabled === 'on'
-          || b.nativeNewznabDirectLinkEnabled === '1'
-          || b.nativeNewznabDirectLinkEnabled === 'true';
         servicePatch.newznabIndexers = newznabIndexersFromBody(b);
       }
       users.updateUserConfig(req.user.id, servicePatch);
@@ -490,7 +487,7 @@ function createApp() {
           apiToken: req.params.apiToken,
           origin: publicOriginFromReq(req),
         });
-        send(res, result, { cacheControl: req.query.debug ? 'no-store' : 'public, max-age=300' });
+        send(res, result, { cacheControl: 'no-store' });
       } catch (err) {
         console.error('[stream] user-route handler error:', err);
         send(res, { streams: [] });
@@ -536,9 +533,10 @@ function createApp() {
           return res.redirect(302, out.url);
         }
         if (out && out.queued) {
+          res.setHeader('Retry-After', String(out.retryAfter || 10));
           return res.status(425)
             .set('Cache-Control', 'no-store')
-            .send('Added to your TorBox Usenet queue. Re-open this event when the download is ready.');
+            .send('TorBox is still processing this Usenet download. The job is saved; click the same result again to wait without adding a duplicate.');
         }
         if (out && out.error === 'candidate-expired') {
           return res.status(410)
@@ -675,7 +673,7 @@ function createApp() {
           basePath: req.configBasePath,
           origin: publicOriginFromReq(req),
         });
-        send(res, result, { cacheControl: req.query.debug ? 'no-store' : 'public, max-age=300' });
+        send(res, result, { cacheControl: 'no-store' });
       } catch (err) {
         console.error('[stream] configured-route handler error:', err);
         send(res, { streams: [] });
@@ -710,8 +708,9 @@ function createApp() {
           return res.redirect(302, out.url);
         }
         if (out && out.queued) {
+          res.setHeader('Retry-After', String(out.retryAfter || 10));
           return res.status(425).set('Cache-Control', 'no-store')
-            .send('Added to your TorBox Usenet queue. Re-open this event when the download is ready.');
+            .send('TorBox is still processing this Usenet download. The job is saved; click the same result again to wait without adding a duplicate.');
         }
         if (out && out.error === 'candidate-expired') {
           return res.status(410).set('Cache-Control', 'no-store')
@@ -2225,8 +2224,6 @@ function renderAccountPage(user, opts) {
     +   '<div class="card-body">'
     +     pipelineSwitch('nativeNewznabEnabled', cfg.nativeNewznabEnabled === true,
             'Enable Newznab pipeline', 'Search your indexers and show separate instant-play and explicit queue rows.')
-    +     pipelineSwitch('nativeNewznabDirectLinkEnabled', cfg.nativeNewznabDirectLinkEnabled === true,
-            'Allow direct TorBox indexer-link attachment', 'For a clicked shared-cache result matched by its link, send its credential-bearing NZB download URL (including your indexer API key) to TorBox. This may avoid TorBox file-upload attach delays. Disabled by default.')
     +     '<p class="text-secondary small">API keys are encrypted at rest. NZB-Sport-Pro fetches only relevant NZBs into bounded, expiring memory; links and bytes never reach the client or disk. Existing TorBox jobs play immediately, while new content enters your account only after its Queue row is clicked. Public HTTPS indexers are required.</p>'
     +     '<div id="newznab-indexers">' + newznabRows + '</div>'
     +     '<button class="btn btn-outline-primary btn-sm" id="newznab-add" type="button">Add indexer</button>'

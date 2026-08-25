@@ -27,8 +27,11 @@ const { createApp } = require('../addon');
     assert.match(configureHtml, /Configure NZB-Sport-Pro/);
     assert.match(configureHtml, /TorBox API key/);
     assert.match(configureHtml, /Newznab indexers/);
-    assert.match(configureHtml, />Install</);
-    assert.match(configureHtml, />Copy Link</);
+    assert.match(configureHtml, />Install Stremio</);
+    assert.match(configureHtml, />Copy Manifest</);
+    assert.match(configureHtml, />Download Collection</);
+    assert.match(configureHtml, />Copy JSON</);
+    assert.doesNotMatch(configureHtml, /Direct indexer-link attachment/);
     assert.doesNotMatch(configureHtml, /Create your install|Create account|Username/);
 
     const generated = await fetch(base + '/configure/token', {

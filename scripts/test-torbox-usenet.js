@@ -77,22 +77,37 @@ async function main() {
   assert.ok(createCall.options.body.includes(Buffer.from('name="add_only_if_cached"\r\n\r\ntrue')));
 
   const uncachedNzb = Buffer.from('<?xml version="1.0"?><nzb><file subject="new"/></nzb>');
+  let uncachedCreateCount = 0;
+  let uncachedReady = false;
   async function uncachedFetch(url, options) {
     if (url.includes('/usenet/checkcached')) return response(200, { data: {} });
     if (url.endsWith('/usenet/createusenetdownload')) {
+      uncachedCreateCount += 1;
       assert.ok(!options.body.includes(Buffer.from('name="add_only_if_cached"')));
       return response(200, { data: { usenetdownload_id: 88 } });
     }
-    if (url.includes('/usenet/mylist')) return response(200, { data: { id: 88, files: [] } });
+    if (url.includes('/usenet/mylist')) return response(200, { data: { id: 88, files: uncachedReady
+      ? [{ id: 8, name: 'new-match.mkv', size: 2500000000 }] : [] } });
+    if (url.includes('/usenet/requestdl')) {
+      return response(200, { data: 'https://cdn.torbox.app/new-match.mkv' });
+    }
     throw new Error('unexpected URL ' + url);
   }
   const queued = await torboxUsenet.resolveNzb(
     uncachedNzb, 'New match', 'torbox-key-2', () => {},
-    { fetchImpl: uncachedFetch, pollIntervalMs: 0 }
+    { fetchImpl: uncachedFetch, pollIntervalMs: 0, waitMs: 0 }
   );
   assert.strictEqual(queued.ok, true);
   assert.strictEqual(queued.queued, true);
+  assert.strictEqual(queued.processing, true);
   assert.strictEqual(queued.id, 88);
+  uncachedReady = true;
+  const resumed = await torboxUsenet.resolveNzb(
+    uncachedNzb, 'New match', 'torbox-key-2', () => {},
+    { fetchImpl: uncachedFetch, knownCached: false, pollIntervalMs: 0, waitMs: 1000 }
+  );
+  assert.strictEqual(resumed.url, 'https://cdn.torbox.app/new-match.mkv');
+  assert.strictEqual(uncachedCreateCount, 1, 'processing job is reused without duplicate submission');
   const batch = torboxUsenet.cachedHashesFromPayload({
     data: { [expectedHash]: { hash: expectedHash } },
   }, [expectedHash, torboxUsenet.nzbHash(uncachedNzb)]);
@@ -167,45 +182,34 @@ async function main() {
   assert.strictEqual(recovered.url, 'https://cdn.torbox.app/recovered-match.mkv');
   assert.strictEqual(recovered.id, 66);
 
-  const directNzb = Buffer.from('<nzb><file subject="direct"><segments><segment number="1">'
-    + 'direct-link-match@news.example</segment></segments></file></nzb>');
-  const directUrl = 'https://indexer.example/api?t=get&id=direct&apikey=private-indexer-key';
-  let directCreateBody = null;
-  const directLogs = [];
-  async function directFetch(url, options) {
+  const falseCacheNzb = Buffer.from('<nzb><file subject="false-cache"/></nzb>');
+  let fallbackCreates = 0;
+  async function fallbackFetch(url, options) {
     if (url.endsWith('/usenet/createusenetdownload')) {
-      directCreateBody = options.body;
-      return response(200, { data: { usenetdownload_id: 55 } });
+      fallbackCreates += 1;
+      const cachedOnly = options.body.includes(Buffer.from('name="add_only_if_cached"\r\n\r\ntrue'));
+      return cachedOnly
+        ? response(409, { detail: 'not cached' })
+        : response(200, { data: { usenetdownload_id: 101 } });
     }
-    if (url.includes('/usenet/mylist?')) {
-      return response(200, { data: { id: 55, files: [
-        { id: 4, name: 'direct-match.mkv', size: 2000000000 },
-      ] } });
-    }
-    if (url.includes('/usenet/requestdl')) {
-      return response(200, { data: 'https://cdn.torbox.app/direct-match.mkv' });
-    }
-    throw new Error('unexpected direct URL ' + url);
+    if (url.includes('/usenet/mylist')) return response(200, { data: [] });
+    throw new Error('unexpected fallback URL ' + url);
   }
-  const direct = await torboxUsenet.resolveNzb(
-    directNzb, 'Direct match', 'torbox-key-direct', (message) => directLogs.push(message), {
-      fetchImpl: directFetch,
+  const fallback = await torboxUsenet.resolveNzb(
+    falseCacheNzb, 'False cache match', 'torbox-key-fallback', () => {}, {
+      fetchImpl: fallbackFetch,
       knownCached: true,
-      nzbUrl: directUrl,
-      useDirectLink: true,
+      recoveryAttempts: 1,
       pollIntervalMs: 0,
+      waitMs: 0,
     }
   );
-  assert.strictEqual(direct.url, 'https://cdn.torbox.app/direct-match.mkv');
-  assert.ok(Buffer.isBuffer(directCreateBody));
-  assert.ok(directCreateBody.includes(Buffer.from('name="link"\r\n\r\n' + directUrl)));
-  assert.ok(directCreateBody.includes(Buffer.from('name="add_only_if_cached"\r\n\r\ntrue')));
-  assert.ok(!directCreateBody.includes(Buffer.from('name="file"')),
-    'direct-link mode sends no file upload part');
-  assert.ok(directLogs.some((line) => line.includes('by direct indexer link')));
-  assert.ok(!directLogs.join('\n').includes('private-indexer-key'),
-    'credential-bearing URL is not logged');
-  console.log('TorBox Usenet cached/queued resolver tests passed');
+  assert.strictEqual(fallback.queued, true);
+  assert.strictEqual(fallback.cached, false);
+  assert.strictEqual(fallback.id, 101);
+  assert.strictEqual(fallbackCreates, 2, 'failed cache attach falls back to one normal queue submission');
+
+  console.log('TorBox Usenet cached/queued/wait-resume resolver tests passed');
 }
 
 main().catch((err) => {

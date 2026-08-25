@@ -21,8 +21,10 @@ function build(userConfig) {
 }
 
 const all = build();
-assert.strictEqual(all.length, 1, 'exports exactly one SSS collection');
+assert.strictEqual(all.length, 1, 'exports exactly one NZB-Sport-Pro collection');
 assert.strictEqual(all[0].id, COLLECTION_ID, 'uses the stable collection ID');
+assert.notStrictEqual(COLLECTION_ID, '629ef7ae-1a48-4e83-8ab3-0cb1f15534b0',
+  'does not collide with the SeriousSportSync collection identity');
 assert.strictEqual(all[0].title, 'NZB-Sport-Pro', 'uses the full product name');
 assert.deepStrictEqual(
   all[0].folders.map((folder) => folder.title),

@@ -14,6 +14,7 @@ process.env.USERS_FILE = path.join(tempRoot, 'users.json');
 process.env.DATA_FILE = path.join(tempRoot, 'events.json');
 process.env.CONTENT_STUDIO_FILE = path.join(tempRoot, 'content-studio.json');
 process.env.REFRESH_ON_EMPTY_CACHE = 'false';
+process.env.TORBOX_USENET_PLAY_WAIT_MS = '0';
 
 const fetch = require('node-fetch');
 
@@ -142,20 +143,16 @@ async function main() {
     const account = await fetch(base + '/account', { headers: { Cookie: cookie } });
     const html = await account.text();
     assert.strictEqual(account.status, 200);
-    for (const name of ['torboxEnabled', 'uuEnabled', 'easynewsEnabled', 'nativeNewznabEnabled',
-      'nativeNewznabDirectLinkEnabled']) {
-      assert.ok(html.includes('name="' + name + '"'), 'account renders ' + name + ' switch');
-    }
-    assert.ok(html.includes('Native Newznab → TorBox Usenet'));
-    assert.ok(html.includes('Experimental install:'));
-    assert.ok(html.includes('including your indexer API key'));
+    assert.ok(html.includes('name="nativeNewznabEnabled"'), 'account renders the core pipeline switch');
+    assert.ok(html.includes('Newznab → TorBox Usenet'));
+    assert.ok(html.includes('Core pipeline'));
+    assert.ok(!html.includes('direct TorBox indexer-link attachment'));
 
     const form = new URLSearchParams();
     form.set('torboxApiKey', 'torbox-secret');
     form.set('torboxEnabled', 'on');
     form.set('easynewsEnabled', 'on');
     form.set('nativeNewznabEnabled', 'on');
-    form.set('nativeNewznabDirectLinkEnabled', 'on');
     form.append('newznabName', 'Local Test');
     form.append('newznabUrl', indexerEndpoint);
     form.append('newznabApiKey', 'newznab-secret');
@@ -174,7 +171,6 @@ async function main() {
     assert.strictEqual(user.config.uuEnabled, false);
     assert.strictEqual(user.config.easynewsEnabled, true);
     assert.strictEqual(user.config.nativeNewznabEnabled, true);
-    assert.strictEqual(user.config.nativeNewznabDirectLinkEnabled, true);
     assert.strictEqual(user.config.newznabIndexers[0].apiKey, 'newznab-secret');
     const rawUsers = fs.readFileSync(process.env.USERS_FILE, 'utf8');
     assert.ok(!rawUsers.includes('torbox-secret'));
@@ -182,8 +178,8 @@ async function main() {
 
     const manifest = await fetch(base + '/u/' + user.id + '/' + user.apiToken + '/manifest.json');
     const payload = await manifest.json();
-    assert.strictEqual(payload.id, 'community.serioussportsync.experimental');
-    assert.strictEqual(payload.name, 'SeriousSportSync Experimental');
+    assert.strictEqual(payload.id, 'community.nzbsportpro');
+    assert.strictEqual(payload.name, 'NZB-Sport-Pro');
     assert.ok(payload.resources.some((resource) => resource.name === 'stream'));
 
     const streamResponse = await fetch(base + '/u/' + user.id + '/' + user.apiToken
@@ -206,6 +202,12 @@ async function main() {
     assert.strictEqual(played.headers.get('location'), mockOrigin + '/video.mp4');
     const queued = await fetch(nativeRows[1].url, { redirect: 'manual' });
     assert.strictEqual(queued.status, 425);
+    assert.ok(Number(queued.headers.get('retry-after')) >= 5);
+    const processingResponse = await fetch(base + '/u/' + user.id + '/' + user.apiToken
+      + '/stream/movie/' + encodeURIComponent(event.id) + '.json');
+    const processingPayload = await processingResponse.json();
+    assert.ok(processingPayload.streams.some((row) => /TorBox Usenet - Processing/.test(row.name || '')),
+      'reopened event identifies the existing processing job');
     assert.strictEqual(torboxUploadCount, 1, 'owned ready job is reused without another upload');
     assert.strictEqual(cachedOnlyCreateCount, 0);
     assert.strictEqual(cacheCheckSawCached, true, 'message-ID hash was included in cache classification');
