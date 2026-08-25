@@ -12,8 +12,18 @@ process.env.PUBLIC_CONFIGS_FILE = path.join(tempRoot, 'public-configs.json');
 process.env.SESSION_SECRET = 'public-page-test-secret-at-least-32-characters';
 
 const { createApp } = require('../addon');
+const streams = require('../lib/streams');
 
 (async () => {
+  const sizeLogs = [];
+  const sizeFiltered = streams._test.filterByMaxResultSize([
+    { title: 'small', size: 5_000_000_000 },
+    { title: 'large', size: 14_000_000_000 },
+    { title: 'unknown', size: 0 },
+  ], 8, (line) => sizeLogs.push(line));
+  assert.deepStrictEqual(sizeFiltered.map((item) => item.title), ['small', 'unknown']);
+  assert.match(sizeLogs[0], /removed 1 result/);
+
   const server = createApp().listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
   const base = 'http://127.0.0.1:' + server.address().port;
@@ -48,6 +58,7 @@ const { createApp } = require('../addon');
         catalogs: ['ufc-upcoming', 'ufc-recent'],
         showCatalogsOnHome: true,
         maxStreams: 8,
+        maxResultSizeGb: 8.5,
       }),
     });
     const links = await generated.json();
@@ -85,6 +96,7 @@ const { createApp } = require('../addon');
     assert.strictEqual(edit.status, 200);
     assert.strictEqual(editPayload.config.torboxApiKey, 'torbox-secret-value');
     assert.strictEqual(editPayload.config.newznabIndexers[0].apiKey, 'newznab-secret-value');
+    assert.strictEqual(editPayload.config.maxResultSizeGb, 8.5);
 
     const updated = await fetch(base + '/configure/token', {
       method: 'POST',

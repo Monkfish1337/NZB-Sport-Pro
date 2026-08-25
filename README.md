@@ -26,6 +26,8 @@ generated private manifest. There is no public signup or user dashboard.
   issues two separate capabilities: a use-only manifest token and a private
   editing token. The manifest cannot reveal the underlying API keys.
 - Keeps NZB URLs and bytes in bounded server memory and out of client responses.
+- Offers an optional per-user maximum result size, filtering oversized releases
+  before NZB preparation and TorBox cache checks to favour quicker queue playback.
 - Never downloads or proxies video data.
 
 TorBox does not reliably expose its global Usenet cache for arbitrary personal
