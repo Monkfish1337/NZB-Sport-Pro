@@ -8,15 +8,46 @@ on:
 
 permissions:
   contents: read
-  packages: write
+
+concurrency:
+  group: publish-container-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: monkfish1337/nzb-sport-pro
 
 jobs:
-  publish:
+  verify:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=high
+      - name: Syntax check
+        run: |
+          set -e
+          git ls-files '*.js' | while read -r file; do node --check "$file"; done
+      - name: Product and playback tests
+        env:
+          SESSION_SECRET: ci-only-do-not-use-in-prod-0000000000000000000000000000000000
+        run: |
+          npm run test:public-page
+          npm run test:native-newznab
+          npm run test:manutd
+          npm run test:nuvio
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -30,7 +61,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=sha
           labels: |

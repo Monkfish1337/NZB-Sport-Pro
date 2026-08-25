@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.8
+
+### Verified container publishing
+
+- Gated GHCR publishing on the same syntax, product, playback, and production
+  dependency checks used for release verification.
+- Added per-ref workflow concurrency so an older build cannot finish later and
+  overwrite a newer image for the same branch.
+- Restricted the floating `latest` image tag to verified builds from `main`;
+  version tags continue to publish immutable semantic-version and commit tags.
+
 ## 0.4.7
 
 ### Public configuration administration
