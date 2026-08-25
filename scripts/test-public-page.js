@@ -69,6 +69,9 @@ const nativeNewznab = require('../lib/sources/native-newznab');
     const inlineScripts = Array.from(configureHtml.matchAll(/<script>([\s\S]*?)<\/script>/g));
     assert.ok(inlineScripts.length > 0);
     inlineScripts.forEach((match) => new vm.Script(match[1], { filename: 'configure-inline.js' }));
+    const initialHealth = await fetch(base + '/health');
+    assert.strictEqual(initialHealth.status, 200);
+    assert.deepStrictEqual((await initialHealth.json()).configStore, { ok: true });
 
     const originalTorBoxTest = torboxUsenet.testConnection;
     const originalNewznabTest = nativeNewznab.testConnection;
@@ -225,6 +228,14 @@ const nativeNewznab = require('../lib/sources/native-newznab');
     assert.strictEqual((await fetch(base + '/configure/edit', {
       method: 'POST', headers: { authorization: 'Bearer ' + editToken },
     })).status, 404);
+
+    fs.writeFileSync(process.env.PUBLIC_CONFIGS_FILE, '{not-json');
+    const unhealthy = await fetch(base + '/health');
+    const unhealthyPayload = await unhealthy.json();
+    assert.strictEqual(unhealthy.status, 503);
+    assert.strictEqual(unhealthyPayload.ok, false);
+    assert.deepStrictEqual(unhealthyPayload.configStore, { ok: false });
+    assert.doesNotMatch(JSON.stringify(unhealthyPayload), /public-configs|nzb-sport-pro-public/);
 
     console.log('stored configure, split edit token, lifecycle, manifest, collection, and tamper tests passed');
   } finally {

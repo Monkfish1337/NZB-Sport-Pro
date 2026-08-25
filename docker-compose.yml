@@ -21,6 +21,7 @@ services:
       # the sole public entry point.
       TRUST_PROXY_HEADERS: "${TRUST_PROXY_HEADERS:-cloudflare}"
       ADMIN_USER: "${ADMIN_USER:-}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
     volumes:
       - nzb_sport_pro_data:/app/data
     ports:

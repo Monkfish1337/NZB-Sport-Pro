@@ -32,6 +32,20 @@ const { runRefresh } = require('./scripts/refresh');
   process.exit(1);
 })();
 
+(function validateEnvironmentAdmin() {
+  const username = String(process.env.ADMIN_USER || '').trim();
+  const password = String(process.env.ADMIN_PASSWORD || '');
+  if (!username && !password) return;
+  if (!username || !password) {
+    console.warn('[nzb-sport-pro] ADMIN_USER and ADMIN_PASSWORD must both be set; environment admin login is disabled.');
+    return;
+  }
+  if (password.length < 12) {
+    console.error('[nzb-sport-pro] FATAL: ADMIN_PASSWORD must contain at least 12 characters.');
+    process.exit(1);
+  }
+})();
+
 const app = createApp();
 
 // Warm the cache on boot so the first request is fast.

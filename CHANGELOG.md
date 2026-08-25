@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.5
+
+### Public configuration resilience
+
+- Made `/health` return HTTP 503 when the encrypted public configuration store
+  is malformed or contains records that cannot be decrypted with the current
+  `SESSION_SECRET`, allowing Docker and monitoring to detect a broken restore.
+- Added encrypted public configuration integrity and capacity information to
+  the operator health page without exposing it through the public endpoint.
+- Updated the administrator backup to use NZB-Sport-Pro branding and clarify
+  that restoring `/app/data` requires the exact separately backed-up secret.
+- Added regression coverage for healthy, missing, and corrupt stores.
+- Reduced the operator dashboard to metadata refresh, stored-user management,
+  health, logs, and backup; retired SeriousSportSync tools now return 404.
+- Added environment-managed dashboard authentication with `ADMIN_USER` and
+  `ADMIN_PASSWORD`, retaining `/setup` only as an optional stored-user fallback.
+
 ## 0.4.4
 
 ### Result controls and editing-link guidance

@@ -68,6 +68,8 @@ services:
       SESSION_SECRET: "replace-with-at-least-32-random-characters"
       PUBLIC_URL: "https://nzb-sport-pro.example.com"
       SETUP_TOKEN: "replace-with-a-separate-random-setup-secret"
+      ADMIN_USER: "operator"
+      ADMIN_PASSWORD: "replace-with-a-strong-operator-password"
       TRUST_PROXY_HEADERS: "cloudflare"
       TSDB_API_KEY: "123"
     volumes:
@@ -104,6 +106,21 @@ For a Cloudflare Tunnel deployment, keep the Compose port bound to
 `127.0.0.1`, set an exact HTTPS `PUBLIC_URL`, use a distinct `SETUP_TOKEN`, and
 do not create a public DNS record that exposes the origin by another route.
 
+### Backup and restore
+
+The operator Health page downloads a timestamped archive of the complete
+`/app/data` volume, including the encrypted public configuration store. Keep a
+separate secure backup of the exact `SESSION_SECRET`; it is deliberately not
+included in the downloadable archive. Neither half can restore public users by
+itself.
+
+For recovery, stop the application, restore the archive into an empty data
+volume, configure the original `SESSION_SECRET`, and then start the container.
+Check `/health` before reopening the tunnel. It returns HTTP 503 when the store
+is malformed or cannot be decrypted with that secret, and HTTP 200 only after
+the restored configurations pass their integrity check. Avoid extracting a
+backup over a running or populated volume.
+
 Start it with:
 
 ~~~bash
@@ -129,10 +146,17 @@ returning keys or response bodies to the browser. **Rotate manifest** immediatel
 invalidates the old install URL while retaining the private editing link.
 **Delete configuration** permanently invalidates both URLs.
 
-The operator dashboard is separate and optional. Visit `/setup` explicitly to
-create its first administrator, then use `/login`, `/account`, and `/admin` for
-the retained maintenance tools. When `PUBLIC_URL` is HTTPS, first-admin setup
-is disabled until a non-empty `SETUP_TOKEN` is configured.
+The operator dashboard is separate and optional. Set both `ADMIN_USER` and an
+`ADMIN_PASSWORD` of at least 12 characters to enable an environment-managed
+login at `/login`; those credentials are never written to the data volume.
+The authenticated maintenance surface contains metadata refresh, operator-user
+management, health, logs, and encrypted backup. Legacy scraper search, power
+tools, match editing, promotion editing, content authoring, and source-setting
+routes are disabled in NZB-Sport-Pro.
+
+If environment credentials are omitted, `/setup` can create a stored fallback
+administrator. When `PUBLIC_URL` is HTTPS, that fallback setup is disabled
+until a non-empty `SETUP_TOKEN` is configured.
 
 ## Metadata shared with SeriousSportSync
 

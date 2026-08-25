@@ -105,6 +105,16 @@ function timingSafeTextEqual(left, right) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+function environmentAdmin() {
+  const username = String(config.admin && config.admin.user || '').trim();
+  const password = String(config.admin && config.admin.password || '');
+  if (!username || !password || password.length < 12) return null;
+  return {
+    id: 'environment-admin', username, role: 'admin',
+    createdAt: '', lastSeen: '', config: {}, apiToken: '',
+  };
+}
+
 const configureWriteLimit = requestGuard.fixedWindow({
   name: 'configure-write', windowMs: process.env.CONFIGURE_RATE_LIMIT_WINDOW_MS || 60000,
   max: process.env.CONFIGURE_RATE_LIMIT_MAX || 5, key: clientIp,
@@ -200,10 +210,11 @@ function createApp() {
   function loadSession(req, res, next) {
     const sess = sessions.readSession(req);
     if (sess && sess.userId) {
-      const u = users.findById(sess.userId);
+      const envAdmin = environmentAdmin();
+      const u = envAdmin && sess.userId === envAdmin.id ? envAdmin : users.findById(sess.userId);
       if (u) {
         req.user = u;
-        users.touchLastSeen(u.id);
+        if (u.id !== 'environment-admin') users.touchLastSeen(u.id);
       }
     }
     next();
@@ -293,18 +304,23 @@ function createApp() {
   app.get('/health', (req, res) => {
     const events = store.getEvents();
     const meta = store.loadFromDisk() || {};
+    const configHealth = publicConfigStore.health();
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    if (!configHealth.ok) res.status(503);
     res.send(JSON.stringify({
-      ok: true,
+      ok: configHealth.ok,
       version: APP_VERSION,
       events: events.length,
       updatedAt: meta.updatedAt || null,
+      configStore: { ok: configHealth.ok },
     }));
   });
 
   // --- Phase 2: setup / login / logout / account (must come BEFORE
   //     the wildcard /:token mount). --------------------------------
   app.get('/setup', (req, res) => {
+    if (environmentAdmin()) return res.status(410).send('Environment-managed administrator is configured.');
     if (users.userCount() > 0) return res.status(410).send('Setup already complete.');
     if (/^https:\/\//i.test(String(config.publicUrl || '')) && !process.env.SETUP_TOKEN) {
       return res.status(503).send(authPage('Initial setup disabled',
@@ -333,6 +349,7 @@ function createApp() {
   });
 
   app.post('/setup', configureWriteLimit, async (req, res) => {
+    if (environmentAdmin()) return res.status(410).send('Environment-managed administrator is configured.');
     if (users.userCount() > 0) return res.status(410).send('Setup already complete.');
     if (/^https:\/\//i.test(String(config.publicUrl || '')) && !process.env.SETUP_TOKEN) {
       return res.status(503).send('Initial setup requires SETUP_TOKEN on a public deployment.');
@@ -349,7 +366,7 @@ function createApp() {
     try {
       const u = await users.createUser({ username, password, role: 'admin' });
       sessions.setCookie(res, u.id, req);
-      res.redirect('/account');
+      res.redirect('/admin');
     } catch (err) {
       res.status(400).send(authPage('Setup failed',
         '<p>' + escapeHtml(err.message) + '</p><p><a href="/setup">Try again</a></p>'));
@@ -359,8 +376,8 @@ function createApp() {
   });
 
   app.get('/login', (req, res) => {
-    if (req.user) return res.redirect('/account');
-    if (users.userCount() === 0) return res.redirect('/setup');
+    if (req.user) return res.redirect(req.user.role === 'admin' ? '/admin' : '/account');
+    if (!environmentAdmin() && users.userCount() === 0) return res.redirect('/setup');
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(authPage('Sign in',
       '<form method="POST" action="/login">'
@@ -516,10 +533,15 @@ function createApp() {
       ));
     }
 
-    const u = users.findByUsername(username);
+    const envAdmin = environmentAdmin();
+    const envMatch = envAdmin
+      && username.toLowerCase() === envAdmin.username.toLowerCase();
+    const u = envMatch ? envAdmin : users.findByUsername(username);
     // Always run bcrypt — verifyDummy for unknown users — so response time
     // doesn't reveal whether the username exists.
-    const ok = u
+    const ok = envMatch
+      ? (await users.verifyDummy(password), timingSafeTextEqual(password, config.admin.password))
+      : u
       ? await users.verifyPassword(password, u.passwordHash)
       : (await users.verifyDummy(password), false);
     if (!ok) {
@@ -538,14 +560,15 @@ function createApp() {
     }
     clearLoginFails(ip);
     sessions.setCookie(res, u.id, req);
-    users.touchLastSeen(u.id);
-    res.redirect('/account');
+    if (u.id !== 'environment-admin') users.touchLastSeen(u.id);
+    res.redirect(u.role === 'admin' ? '/admin' : '/account');
   });
 
   app.post('/logout', (req, res) => { sessions.clearCookie(res, req); res.redirect('/login'); });
   app.get('/logout',  (req, res) => { sessions.clearCookie(res, req); res.redirect('/login'); });
 
   app.get('/account', requireLogin, (req, res) => {
+    if (req.user.id === 'environment-admin') return res.redirect('/admin');
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(renderAccountPage(req.user, { flash: req.query.flash || null, origin: publicOriginFromReq(req) }));
   });
@@ -964,6 +987,18 @@ function createApp() {
   // Mount BEFORE the wildcard /:token to claim these paths.
 
   // --- Admin panel (Phase 2 Day 4) ----------------------------------
+  const retiredAdminPaths = [
+    '/admin/power-tool', '/admin/search', '/admin/match-editor',
+    '/admin/promotions', '/admin/content', '/admin/sources',
+  ];
+  for (const retiredPath of retiredAdminPaths) {
+    app.use(retiredPath, requireAdmin, (req, res) => res.status(404).send(authPage(
+      'Maintenance tool unavailable',
+      '<p>This legacy SeriousSportSync operator tool is not part of NZB-Sport-Pro.</p>'
+      + '<p><a href="/admin">Back to maintenance</a></p>'
+    )));
+  }
+
   app.get('/admin', requireAdmin, (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(renderAdminPage(req.user, { flash: req.query.flash || null, origin: publicOriginFromReq(req) }));
@@ -1236,7 +1271,7 @@ function createApp() {
     const { spawn } = require('child_process');
     const dataDir = path.dirname(config.dataFile); // ./data → /app/data
     const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const filename = 'serioussportsync-backup-' + ts + '.tar.gz';
+    const filename = 'nzb-sport-pro-backup-' + ts + '.tar.gz';
     res.setHeader('Content-Type', 'application/gzip');
     res.setHeader('Content-Disposition', 'attachment; filename="' + filename + '"');
     res.setHeader('Cache-Control', 'no-store');
@@ -1745,71 +1780,22 @@ function renderAdminPage(currentUser, opts) {
       + '</tr>';
   }).join('');
 
-  // Torrent discovery endpoints are optional and may be used together.
-  const _comp = settings.getCompanion();
-  const _prowlarr = settings.getProwlarr();
-  // 0.38.1: football-data.org API key field on /admin Sources so admins can
-  // save/rotate the key without editing docker-compose.yml.
-  const _fd = settings.getFootballData();
-
   const body = ''
     + '<div class="page-header">'
     +   '<div class="row align-items-center">'
     +     '<div class="col">'
-    +       '<h2 class="page-title">Admin</h2>'
-    +       '<div class="text-secondary mt-1">Admin panel — manage users for this SeriousSportSync instance. Logged in as <code>' + escapeHtml(currentUser.username) + '</code>.</div>'
+    +       '<h2 class="page-title">Maintenance</h2>'
+    +       '<div class="text-secondary mt-1">NZB-Sport-Pro operator maintenance. Logged in as <code>' + escapeHtml(currentUser.username) + '</code>.</div>'
     +     '</div>'
     +   '</div>'
     + '</div>'
     + flashHtml
 
-    // Companion scraper config
-    + '<div class="card mb-3">'
-    +   '<div class="card-header"><h3 class="card-title">Torrent discovery and metadata sources</h3></div>'
-    +   '<div class="card-body">'
-    +     '<p class="text-secondary small mb-3">URL of the SeriousSportScraper companion service you have deployed. The metadata addon delegates content discovery to it and resolves the returned hashes through each user\'s own TorBox key. Leave blank if you only want to use direct Prowlarr.</p>'
-    +     '<form method="POST" action="/admin/sources">'
-    +       '<div class="mb-3">'
-    +         '<label class="form-label">Companion URL</label>'
-    +         '<input class="form-control text-mono" name="companionUrl" value="' + escapeHtml(_comp.url) + '" placeholder="http://scraper:8080" autocomplete="off">'
-    +       '</div>'
-    +       secretField('Companion auth token (optional)', 'companionAuthToken', _comp.authToken, 'shared bearer if scraper is internet-exposed')
-
-    +       '<hr class="my-4">'
-    +       '<h4 class="mb-2">Direct Prowlarr (optional)</h4>'
-    +       '<p class="text-secondary small mb-3">Query Prowlarr directly when a user opens an event. Discovery is request-only and limited to that event. Results are filtered and checked against each user\'s TorBox account; raw torrent rows are never returned. The URL must be reachable from this container. For a separate Dockge stack, use a shared Docker network or the server address; <code>localhost</code> refers to this container.</p>'
-    +       '<div class="mb-3">'
-    +         '<label class="form-label">Prowlarr URL</label>'
-    +         '<input class="form-control text-mono" type="url" name="prowlarrUrl" value="' + escapeHtml(_prowlarr.url) + '" placeholder="http://prowlarr:9696" autocomplete="off">'
-    +       '</div>'
-    +       secretField('Prowlarr API key', 'prowlarrApiKey', _prowlarr.apiKey, 'Settings → General → Security')
-
-    // 0.38.1: football-data.org API key block. Saved value overrides
-    // FOOTBALL_DATA_API_KEY env var. Used by custom promotions whose source
-    // === 'football-data' (FIFA WC, EPL, Champions League, etc.).
-    +       '<hr class="my-4">'
-    +       '<h4 class="mb-2">football-data.org</h4>'
-    +       '<p class="text-secondary small mb-3">API key for the football-data.org parallel source — used by custom promotions whose source is set to football-data (FIFA WC, EPL, Champions League, etc.). Free tier covers ~10 req/min. Sign up at <a href="https://www.football-data.org/client/register" target="_blank" rel="noopener" class="link-primary">football-data.org/client/register</a>. Saving here overrides the FOOTBALL_DATA_API_KEY env var.</p>'
-    +       secretField('football-data.org API key', 'footballDataApiKey', _fd.apiKey, 'paste your football-data.org token')
-
-    // 0.39.0: general-search config lives on the scraper, not SSS. Indexer
-    // sources are configured in the scraper at /sources; downloader targets
-    // (qBit + SAB) at /downloaders. SSS only proxies — see /admin/search.
-    +       '<hr class="my-4">'
-    +       '<h4 class="mb-2">General search</h4>'
-    +       '<p class="text-secondary small mb-0">The <a href="/admin/search" class="link-primary">/admin/search</a> page proxies through to the companion scraper above. The direct Prowlarr option above is also available in the event power tool. Configure companion-managed Prowlarr instances on the scraper\'s <a href="' + escapeHtml(_comp.url || '#') + '/sources" target="_blank" rel="noopener" class="link-primary">Sources</a> page and qBit / SAB credentials on its <a href="' + escapeHtml(_comp.url || '#') + '/downloaders" target="_blank" rel="noopener" class="link-primary">Downloaders</a> page (scraper v0.1.4+).</p>'
-
-    +       '<hr class="my-4">'
-    +       '<button class="btn btn-primary" type="submit">Save sources</button>'
-    +     '</form>'
-    +   '</div>'
-    + '</div>'
-
     // Catalogs / refresh
     + '<div class="card mb-3">'
-    +   '<div class="card-header"><h3 class="card-title">Catalogs</h3></div>'
+    +   '<div class="card-header"><h3 class="card-title">Metadata refresh</h3></div>'
     +   '<div class="card-body">'
-    +     '<p class="text-secondary small mb-3">Pulls fresh event metadata from TSDB (and any other configured sources) for every enabled promotion — built-in and custom. Runs in the background; scheduled refresh fires every 6h regardless. Use this button after adding a new custom promotion so its events appear without waiting on the scheduler.</p>'
+    +     '<p class="text-secondary small mb-3">Pull fresh event metadata for every enabled catalog now. Normal refreshes continue automatically on the configured schedule.</p>'
     +     '<form method="POST" action="/admin/refresh-events" class="d-inline">'
     +       '<button class="btn btn-primary" type="submit">Refresh catalogs now</button>'
     +     '</form>'
@@ -1818,7 +1804,7 @@ function renderAdminPage(currentUser, opts) {
 
     // Users
     + '<div class="card mb-3">'
-    +   '<div class="card-header"><h3 class="card-title">Users (' + all.length + ')</h3></div>'
+    +   '<div class="card-header"><h3 class="card-title">Stored operator users (' + all.length + ')</h3></div>'
     +   '<div class="table-responsive">'
     +     '<table class="table table-vcenter card-table">'
     +       '<thead><tr><th>Username</th><th>Role</th><th>Created</th><th>Last seen</th><th class="w-1"></th></tr></thead>'
@@ -1829,9 +1815,9 @@ function renderAdminPage(currentUser, opts) {
 
     // Create new user
     + '<div class="card mb-3">'
-    +   '<div class="card-header"><h3 class="card-title">Create a new user</h3></div>'
+    +   '<div class="card-header"><h3 class="card-title">Create a stored operator user</h3></div>'
     +   '<div class="card-body">'
-    +     '<p class="text-secondary small mb-3">After creating a user, they log in at the root URL and copy their own install URL from their account page. Install URLs and API tokens are private to each user and are never shown here.</p>'
+    +     '<p class="text-secondary small mb-3">Optional additional operator account stored in the data volume. The primary environment-managed administrator is configured with ADMIN_USER and ADMIN_PASSWORD.</p>'
     +     '<form method="POST" action="/admin/users/create" class="row g-2 align-items-end">'
     +       '<div class="col-md-4">'
     +         '<label class="form-label">Username</label>'
@@ -1921,8 +1907,20 @@ function renderHealthPage(currentUser, opts) {
   const backupCardHtml = statCard(
     'Backup',
     '<span class="text-secondary fs-3">tar.gz</span>',
-    'Timestamped tar.gz of /app/data (events, users, settings, denylists, and positive cache).',
+    'Encrypted public configurations and all other /app/data state. Restore with the exact SESSION_SECRET used when this backup was created.',
     '<a href="/admin/backup" class="btn btn-sm btn-outline-primary">Download backup</a>'
+  );
+
+  const publicStore = publicConfigStore.health();
+  const publicStoreCardHtml = statCard(
+    'Public configurations',
+    publicStore.ok
+      ? '<strong>' + publicStore.records + '</strong> <span class="text-secondary fs-4">stored</span>'
+      : '<strong class="text-danger">Unhealthy</strong>',
+    publicStore.ok
+      ? publicStore.readable + ' decryptable &middot; capacity ' + publicStore.maxRecords
+      : 'The encrypted store or one of its records cannot be read with the current SESSION_SECRET.',
+    ''
   );
 
   const body = ''
@@ -1940,6 +1938,7 @@ function renderHealthPage(currentUser, opts) {
     +   denyCard('TB', tbDenylist)
     +   denyCard('PM', pmDenylist)
     +   positiveCardHtml
+    +   publicStoreCardHtml
     +   backupCardHtml
     + '</div>';
 
