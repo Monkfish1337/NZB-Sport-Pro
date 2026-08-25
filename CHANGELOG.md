@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.3
+
+### Configurator interaction hotfix
+
+- Corrected escaping in the generated configurator script that prevented all
+  button event handlers from being registered in the browser.
+- Added a regression that compiles the final generated inline script, plus a
+  browser interaction pass covering Add indexer, Test services, and Save edits.
+
 ## 0.4.2
 
 ### Safer public configuration management

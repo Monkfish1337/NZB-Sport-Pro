@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const vm = require('vm');
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nzb-sport-pro-public-'));
 process.env.DATA_FILE = path.join(tempRoot, 'events.json');
@@ -52,6 +53,9 @@ const nativeNewznab = require('../lib/sources/native-newznab');
     assert.match(configureHtml, /Changes saved\. Your manifest is up to date\./);
     assert.doesNotMatch(configureHtml, /Direct indexer-link attachment/);
     assert.doesNotMatch(configureHtml, /Create your install|Create account|Username/);
+    const inlineScripts = Array.from(configureHtml.matchAll(/<script>([\s\S]*?)<\/script>/g));
+    assert.ok(inlineScripts.length > 0);
+    inlineScripts.forEach((match) => new vm.Script(match[1], { filename: 'configure-inline.js' }));
 
     const originalTorBoxTest = torboxUsenet.testConnection;
     const originalNewznabTest = nativeNewznab.testConnection;
