@@ -21,9 +21,15 @@ async function main() {
   let torboxUploadCount = 0;
   let nzbFetchCount = 0;
   let cachedOnlyCreateCount = 0;
-  const cachedNzb = Buffer.from('<?xml version="1.0"?><nzb><file subject="cached-match"/></nzb>');
-  const queuedNzb = Buffer.from('<?xml version="1.0"?><nzb><file subject="queued-match"/></nzb>');
-  const cachedHash = crypto.createHash('md5').update(cachedNzb).digest('hex');
+  let cacheCheckSawCached = false;
+  const cachedMessageId = 'cached-main-card@news.example';
+  const cachedNzb = Buffer.from('<?xml version="1.0"?><nzb><file poster="source" subject="cached-match">'
+    + '<segments><segment bytes="123" number="1">' + cachedMessageId
+    + '</segment></segments></file></nzb>');
+  const queuedNzb = Buffer.from('<?xml version="1.0"?><nzb><file subject="queued-match">'
+    + '<segments><segment bytes="123" number="1">queued-prelims@news.example'
+    + '</segment></segments></file></nzb>');
+  const cachedHash = crypto.createHash('md5').update(cachedMessageId).digest('hex');
   const mockServer = http.createServer((req, res) => {
     const requestUrl = new URL(req.url, 'http://127.0.0.1');
     const origin = 'http://127.0.0.1:' + mockServer.address().port;
@@ -49,9 +55,10 @@ async function main() {
       req.on('data', (chunk) => chunks.push(chunk));
       return req.on('end', () => {
         const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-        assert.ok(body.hashes.includes(cachedHash));
+        const hasCached = body.hashes.includes(cachedHash);
+        cacheCheckSawCached = cacheCheckSawCached || hasCached;
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ data: { [cachedHash]: { hash: cachedHash } } }));
+        res.end(JSON.stringify({ data: hasCached ? { [cachedHash]: { hash: cachedHash } } : {} }));
       });
     }
     if (requestUrl.pathname === '/v1/api/usenet/createusenetdownload') {
@@ -186,6 +193,7 @@ async function main() {
     assert.strictEqual(queued.status, 425);
     assert.strictEqual(torboxUploadCount, 2);
     assert.strictEqual(cachedOnlyCreateCount, 1);
+    assert.strictEqual(cacheCheckSawCached, true, 'message-ID hash was included in cache classification');
     assert.strictEqual(nzbFetchCount, 2, 'prepared NZBs are reused on click without a second indexer grab');
     console.log('experimental account UI, instant/queue rows, bounded NZB reuse, and both play paths passed');
   } finally {

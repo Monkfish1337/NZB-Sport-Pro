@@ -10,8 +10,20 @@ function response(status, payload) {
 }
 
 async function main() {
-  const nzb = Buffer.from('<?xml version="1.0"?><nzb><file subject="match"/></nzb>');
-  const expectedHash = torboxUsenet.nzbHash(nzb);
+  const messageId = 'cached-match-part1@news.example';
+  const nzb = Buffer.from('<?xml version="1.0"?><nzb><!-- indexer comment -->'
+    + '<file poster="indexer-user" subject="match"><segments>'
+    + '<segment bytes="123" number="1">' + messageId + '</segment>'
+    + '</segments></file></nzb>');
+  const expectedHash = require('crypto').createHash('md5').update(messageId).digest('hex');
+  const rawHash = torboxUsenet.nzbHash(nzb);
+  const nzbUrl = 'https://indexer.example/api?t=get&id=123&apikey=secret';
+  const strategies = torboxUsenet.nzbCacheHashes(nzb, nzbUrl);
+  assert.strictEqual(torboxUsenet.firstMessageIds(nzb)[0], messageId);
+  assert.ok(strategies.includes(expectedHash), 'message-ID strategy is included');
+  assert.ok(strategies.includes(rawHash), 'raw NZB fallback is included');
+  assert.ok(strategies.includes(require('crypto').createHash('md5').update(nzbUrl).digest('hex')),
+    'exact indexer-link strategy is included');
   const calls = [];
   async function cachedFetch(url, options) {
     calls.push({ url, options });
@@ -38,7 +50,7 @@ async function main() {
 
   const resolved = await torboxUsenet.resolveNzb(
     nzb, 'Hull City vs Manchester United', 'torbox-key-1', () => {},
-    { fetchImpl: cachedFetch, pollIntervalMs: 0 }
+    { fetchImpl: cachedFetch, pollIntervalMs: 0, nzbUrl }
   );
   assert.strictEqual(resolved.ok, true);
   assert.strictEqual(resolved.cached, true);
@@ -47,7 +59,9 @@ async function main() {
   assert.ok(calls.some((call) => call.url.includes('usenet_id=77')));
   const cacheCall = calls.find((call) => call.url.includes('/usenet/checkcached'));
   assert.strictEqual(cacheCall.options.method, 'POST');
-  assert.deepStrictEqual(JSON.parse(cacheCall.options.body), { hashes: [expectedHash] });
+  const checkedHashes = JSON.parse(cacheCall.options.body).hashes;
+  assert.ok(checkedHashes.includes(expectedHash));
+  assert.ok(checkedHashes.includes(rawHash));
   const createCall = calls.find((call) => call.url.endsWith('/usenet/createusenetdownload'));
   assert.ok(createCall.options.body.includes(Buffer.from('name="add_only_if_cached"\r\n\r\ntrue')));
 
