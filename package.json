@@ -35,7 +35,7 @@
     "dependencies": {
         "bcryptjs": "^2.4.3",
         "express": "^4.22.2",
-        "https-proxy-agent": "^7.0.2",
+        "https-proxy-agent": "^9.1.0",
         "node-fetch": "^2.7.0"
     },
     "engines": {
