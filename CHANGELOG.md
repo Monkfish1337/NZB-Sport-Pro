@@ -8,7 +8,8 @@
   API keys encrypted and credential-bearing NZB links out of client responses.
 - Added bounded in-memory NZB preparation and a batched TorBox shared-cache
   check, producing distinct instant-play and explicit queue rows. Matching uses
-  TorBox's documented message-ID, NZB-file, and exact/normalized link hashes.
+  TorBox's documented message-ID, NZB-file, and exact/normalized link hashes;
+  every displayed native row is prepared and classified by default.
 - Cached clicks use TorBox cached-only creation; uncached content is not added
   to a user's account until its queue row is clicked. SSS never stores NZBs on
   disk or proxies media.

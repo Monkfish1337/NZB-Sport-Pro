@@ -119,7 +119,8 @@ opaque, signed tokens. SSS fetches only the top relevant NZBs into a bounded,
 expiring memory cache, hashes them, and checks TorBox's shared Usenet cache in
 one batch. It uses TorBox's documented message-ID, NZB-file, and
 exact/normalized link strategies so equivalent indexer NZBs can match the same
-cached download. `Instant Play` rows are attached to the user's account in
+cached download. By default every displayed native result is included in that
+classification. `Instant Play` rows are attached to the user's account in
 cached-only mode when clicked; `Queue` rows begin processing only when clicked.
 Once a queued job completes, re-open the event and the shared-cache check will
 surface it as instant play. SSS never writes NZBs to disk or proxies media.
