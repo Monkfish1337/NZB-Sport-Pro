@@ -11,9 +11,12 @@ function response(status, payload) {
 
 async function main() {
   const messageId = 'cached-match-part1@news.example';
+  const secondMessageId = 'cached-match-par2@news.example';
   const nzb = Buffer.from('<?xml version="1.0"?><nzb><!-- indexer comment -->'
     + '<file poster="indexer-user" subject="match"><segments>'
     + '<segment bytes="123" number="1">' + messageId + '</segment>'
+    + '</segments></file><file subject="recovery"><segments>'
+    + '<segment bytes="456" number="1">' + secondMessageId + '</segment>'
     + '</segments></file></nzb>');
   const expectedHash = require('crypto').createHash('md5').update(messageId).digest('hex');
   const rawHash = torboxUsenet.nzbHash(nzb);
@@ -24,6 +27,9 @@ async function main() {
   assert.ok(strategies.includes(rawHash), 'raw NZB fallback is included');
   assert.ok(strategies.includes(require('crypto').createHash('md5').update(nzbUrl).digest('hex')),
     'exact indexer-link strategy is included');
+  assert.notStrictEqual(strategies[1],
+    require('crypto').createHash('md5').update(secondMessageId).digest('hex'),
+    'core NZB and link strategies precede extra message IDs');
   const calls = [];
   async function cachedFetch(url, options) {
     calls.push({ url, options });

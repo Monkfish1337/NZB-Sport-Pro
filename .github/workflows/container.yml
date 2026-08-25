@@ -37,7 +37,7 @@ jobs:
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=experimental-newznab,enable=${{ github.ref == 'refs/heads/feature/hosted-newznab-torbox' }}
-            type=raw,value=0.46.0-experimental.2,enable=${{ github.ref == 'refs/heads/feature/hosted-newznab-torbox' }}
+            type=raw,value=0.46.0-experimental.3,enable=${{ github.ref == 'refs/heads/feature/hosted-newznab-torbox' }}
             type=ref,event=tag
             type=sha
           labels: |

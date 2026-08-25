@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.46.0-experimental.2
+## 0.46.0-experimental.3
 
 ### Isolated native Newznab → TorBox Usenet development
 
@@ -12,6 +12,8 @@
   every displayed native row is prepared and classified by default.
 - Completed downloads already owned by the user are matched through TorBox's
   Usenet list and reused directly when the shared cache endpoint misses them.
+- Shared-cache batches prioritize one message ID plus cleaned/raw NZB and
+  exact/normalized URL hashes for every displayed result before extra IDs.
 - Cached clicks use TorBox cached-only creation; uncached content is not added
   to a user's account until its queue row is clicked. SSS never stores NZBs on
   disk or proxies media.
