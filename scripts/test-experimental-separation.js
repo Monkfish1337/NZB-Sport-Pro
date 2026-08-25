@@ -51,4 +51,19 @@ const nativeToggleSnippet = 'const b=require(' + JSON.stringify(manifestPath) + 
   + 'process.stdout.write(JSON.stringify({nativeOn:has({...base,nativeNewznabEnabled:true}),nativeOff:has({...base,nativeNewznabEnabled:false})}));';
 assert.deepStrictEqual(run(nativeToggleSnippet, 'on'), { nativeOn: true, nativeOff: false });
 
+const promotionsPath = path.resolve(__dirname, '..', 'lib', 'promotions.js');
+const ufcQuerySnippet = 'const u=require(' + JSON.stringify(promotionsPath) + ').byPrefix.ufc;'
+  + 'const e={name:"UFC Fight Night 285 Hernandez vs Rodrigues",date:"2026-08-22",kind:"fight-night"};'
+  + 'process.stdout.write(JSON.stringify({standard:u.searchTitles(e),native:u.nativeNewznabSearchTitles(e)}));';
+assert.deepStrictEqual(run(ufcQuerySnippet, 'on'), {
+  standard: ['UFC Fight Night 285', 'UFC FN 285'],
+  native: [
+    'UFC Fight Night 285 Main Card',
+    'UFC Fight Night 285 Main Event',
+    'UFC Fight Night 285 Hernandez vs Rodrigues',
+    'UFC Fight Night 285',
+    'UFC FN 285',
+  ],
+});
+
 console.log('stable/experimental separation and pipeline-toggle tests passed');
