@@ -90,9 +90,24 @@ const publicConfigStore = require('../lib/public-config-store');
     assert.match(html, /8 GB max/);
     assert.match(html, /Pre-shows excluded/);
     assert.match(html, />Health</);
+    assert.match(html, />Metadata sync</);
     assert.match(html, />Logs</);
     assert.doesNotMatch(html, /Power Tool|Match Editor|Content Studio|Torrent discovery|Direct Prowlarr|General search|Stored users|Invites \(/);
     assert.doesNotMatch(html, /environment-admin-password|admin-test-torbox-secret|indexer-secret|indexer\.example/);
+
+    const healthPage = await fetch(base + '/admin/health', { headers: { cookie } });
+    const healthHtml = await healthPage.text();
+    assert.strictEqual(healthPage.status, 200);
+    assert.match(healthHtml, /Metadata sync/);
+    assert.match(healthHtml, /Verified/);
+
+    const syncPage = await fetch(base + '/admin/metadata-sync', { headers: { cookie } });
+    const syncHtml = await syncPage.text();
+    assert.strictEqual(syncPage.status, 200);
+    assert.match(syncHtml, /Snapshot verified/);
+    assert.match(syncHtml, /Serioussportsync\/commit\/[a-f0-9]{40}/);
+    assert.match(syncHtml, /31 declared/);
+    assert.doesNotMatch(syncHtml, /environment-admin-password|admin-test-torbox-secret|indexer-secret/);
 
     const manifestPath = '/c/' + encodeURIComponent(savedConfig.accessToken) + '/manifest.json';
     assert.strictEqual((await fetch(base + manifestPath)).status, 200);

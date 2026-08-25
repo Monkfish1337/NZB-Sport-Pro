@@ -173,8 +173,16 @@ changes independently here.
 
 [`metadata-sync.json`](metadata-sync.json) declares the shared boundary. The
 scheduled `Sync SeriousSportSync metadata` workflow checks out both public
-repositories every six hours, copies those paths, runs metadata and playback
-tests, and commits changes to NZB-Sport-Pro only when something changed.
+repositories every six hours, copies those paths, runs NSP compatibility
+tests, and opens or updates a review pull request only when the accepted
+metadata snapshot changed. Merging that PR triggers the normal verified NSP
+container release; the sync workflow never pushes directly to `main`.
+
+The admin **Metadata sync** page verifies the bundled files against the
+recorded SHA-256 snapshot and shows the exact SSS commit, acceptance time, and
+managed path coverage. It links to the sync workflow for pending upstream
+reviews. Shared-file fixes found while working in NSP must be made in SSS first
+because the next accepted sync deliberately replaces those managed paths.
 
 Manual local sync:
 

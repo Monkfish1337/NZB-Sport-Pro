@@ -4,6 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const childProcess = require('child_process');
+const { computeDigest } = require('../lib/metadata-sync-status');
 
 const productRoot = path.resolve(process.argv[3] || path.join(__dirname, '..'));
 const sourceRoot = path.resolve(process.argv[2] || process.env.SSS_METADATA_SOURCE || '../Serioussportsync');
@@ -39,16 +40,20 @@ try {
   }).trim();
 } catch {}
 
-const state = {
+const contentDigest = computeDigest(productRoot, manifest.paths);
+const snapshotUnchanged = previousState
+  && changedPaths.length === 0
+  && previousState.contentDigest === contentDigest
+  && previousState.sourceRepository === manifest.sourceRepository
+  && previousState.sourceBranch === manifest.sourceBranch
+  && previousState.pathCount === manifest.paths.length;
+const state = snapshotUnchanged ? previousState : {
   sourceRepository: manifest.sourceRepository,
   sourceBranch: manifest.sourceBranch,
   sourceCommit: commit,
-  syncedAt: previousState
-    && previousState.sourceCommit === commit
-    && changedPaths.length === 0
-    ? previousState.syncedAt
-    : new Date().toISOString(),
+  syncedAt: new Date().toISOString(),
   pathCount: manifest.paths.length,
+  contentDigest,
 };
 const nextState = JSON.stringify(state, null, 2) + '\n';
 const stateUnchanged = previousState

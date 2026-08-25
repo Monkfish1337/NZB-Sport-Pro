@@ -36,6 +36,7 @@ const publicPage = require('./lib/public-page');
 const publicConfig = require('./lib/public-config');
 const publicConfigStore = require('./lib/public-config-store');
 const requestGuard = require('./lib/request-guard');
+const metadataSyncStatus = require('./lib/metadata-sync-status');
 const APP_VERSION = require('./package.json').version || '?';
 
 
@@ -1725,6 +1726,12 @@ function createApp() {
     return res.redirect('/configure');
   });
 
+  app.get('/admin/metadata-sync', requireAdmin, (req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(renderMetadataSyncPage(req.user));
+  });
+
   return app;
 }
 
@@ -1880,6 +1887,19 @@ function renderHealthPage(currentUser, opts) {
     ''
   );
 
+  const syncStatus = metadataSyncStatus.getStatus();
+  const syncCommit = syncStatus.sourceCommit ? syncStatus.sourceCommit.slice(0, 12) : 'unknown';
+  const syncCardHtml = statCard(
+    'Metadata sync',
+    syncStatus.ok
+      ? '<strong class="text-success">Verified</strong>'
+      : '<strong class="text-danger">Attention required</strong>',
+    escapeHtml(syncStatus.sourceRepository || 'Unknown source') + ' @ <code>'
+      + escapeHtml(syncCommit) + '</code> &middot; '
+      + syncStatus.pathCount + ' managed paths',
+    '<a href="/admin/metadata-sync" class="btn btn-sm btn-outline-primary">View provenance</a>'
+  );
+
   const body = ''
     + '<div class="page-header">'
     +   '<div class="row align-items-center">'
@@ -1896,10 +1916,75 @@ function renderHealthPage(currentUser, opts) {
     +   denyCard('PM', pmDenylist)
     +   positiveCardHtml
     +   publicStoreCardHtml
+    +   syncCardHtml
     +   backupCardHtml
     + '</div>';
 
   return tablerChrome.tablerPage('Health', body, { user: currentUser, currentSection: 'health' });
+}
+
+function renderMetadataSyncPage(currentUser) {
+  const status = metadataSyncStatus.getStatus();
+  const shortCommit = status.sourceCommit ? status.sourceCommit.slice(0, 12) : 'unknown';
+  const syncedAtMs = Date.parse(status.syncedAt);
+  const syncedText = Number.isFinite(syncedAtMs)
+    ? new Date(syncedAtMs).toISOString().replace('T', ' ').replace('.000Z', ' UTC')
+    : 'unknown';
+  const ageText = status.ageHours == null ? 'unknown'
+    : status.ageHours < 1 ? Math.round(status.ageHours * 60) + ' minutes'
+      : status.ageHours < 48 ? status.ageHours.toFixed(1) + ' hours'
+        : (status.ageHours / 24).toFixed(1) + ' days';
+  const sourceLink = status.sourceCommitUrl
+    ? '<a href="' + escapeHtml(status.sourceCommitUrl) + '" target="_blank" rel="noopener"><code>'
+      + escapeHtml(shortCommit) + '</code></a>'
+    : '<code>' + escapeHtml(shortCommit) + '</code>';
+  const workflowLink = status.workflowUrl
+    ? '<a class="btn btn-outline-primary" href="' + escapeHtml(status.workflowUrl)
+      + '" target="_blank" rel="noopener">Open sync workflow</a>'
+    : '';
+  const errorHtml = status.errors.length
+    ? '<div class="alert alert-danger"><strong>Snapshot verification failed.</strong><ul class="mb-0 mt-2">'
+      + status.errors.map((item) => '<li>' + escapeHtml(item) + '</li>').join('') + '</ul></div>'
+    : '<div class="alert alert-success"><strong>Snapshot verified.</strong> Every managed file matches the digest recorded when this SSS commit was accepted.</div>';
+
+  const body = ''
+    + '<div class="page-header"><div class="row align-items-center"><div class="col">'
+    +   '<h2 class="page-title">Metadata sync</h2>'
+    +   '<div class="text-secondary mt-1">Provenance and integrity of the SeriousSportSync metadata bundled into this NSP release.</div>'
+    + '</div><div class="col-auto">' + workflowLink + '</div></div></div>'
+    + errorHtml
+    + '<div class="row row-cards mb-3">'
+    +   '<div class="col-sm-6 col-lg-4"><div class="card"><div class="card-body">'
+    +     '<div class="subheader mb-2">Snapshot integrity</div><div class="h2 '
+    +       (status.ok ? 'text-success">Verified' : 'text-danger">Failed') + '</div>'
+    +     '<div class="text-secondary small">SHA-256 over every declared path</div>'
+    +   '</div></div></div>'
+    +   '<div class="col-sm-6 col-lg-4"><div class="card"><div class="card-body">'
+    +     '<div class="subheader mb-2">SSS source commit</div><div class="h2">' + sourceLink + '</div>'
+    +     '<div class="text-secondary small">' + escapeHtml(status.sourceRepository) + ' / ' + escapeHtml(status.sourceBranch) + '</div>'
+    +   '</div></div></div>'
+    +   '<div class="col-sm-6 col-lg-4"><div class="card"><div class="card-body">'
+    +     '<div class="subheader mb-2">Managed boundary</div><div class="h2"><strong>'
+    +       status.pathCount + '</strong> paths</div>'
+    +     '<div class="text-secondary small">Snapshot accepted ' + escapeHtml(ageText) + ' ago</div>'
+    +   '</div></div></div>'
+    + '</div>'
+    + '<div class="card mb-3"><div class="card-header"><h3 class="card-title">Bundled snapshot</h3></div>'
+    +   '<div class="table-responsive"><table class="table table-vcenter card-table"><tbody>'
+    +     '<tr><th>Repository</th><td>' + escapeHtml(status.sourceRepository || 'unknown') + '</td></tr>'
+    +     '<tr><th>Branch</th><td><code>' + escapeHtml(status.sourceBranch || 'unknown') + '</code></td></tr>'
+    +     '<tr><th>Commit</th><td>' + sourceLink + '</td></tr>'
+    +     '<tr><th>Accepted at</th><td>' + escapeHtml(syncedText) + '</td></tr>'
+    +     '<tr><th>Path coverage</th><td>' + status.pathCount + ' declared &middot; '
+    +       status.missingPaths.length + ' missing</td></tr>'
+    +     '<tr><th>Content digest</th><td><code class="text-break">' + escapeHtml(status.contentDigest || 'missing') + '</code></td></tr>'
+    +   '</tbody></table></div></div>'
+    + '<div class="card"><div class="card-header"><h3 class="card-title">Release flow</h3></div><div class="card-body">'
+    +   '<p class="mb-2">SSS owns the shared metadata. Automation copies only the declared boundary into a review branch, runs NSP compatibility tests, and opens or updates a pull request.</p>'
+    +   '<p class="text-secondary mb-0">This page verifies the snapshot inside the running container. Pending upstream changes remain visible in the linked GitHub workflow and pull request until reviewed and released.</p>'
+    + '</div></div>';
+
+  return tablerChrome.tablerPage('Metadata sync', body, { user: currentUser, currentSection: 'metadata-sync' });
 }
 
 // 0.27.0: in-GUI log viewer. Filters (category / user / substring / level)

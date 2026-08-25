@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: metadata-sync
@@ -30,7 +31,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Sync the declared metadata boundary
         run: node product/scripts/sync-metadata.js source product
@@ -41,15 +42,51 @@ jobs:
           SESSION_SECRET: ci-only-do-not-use-in-prod-0000000000000000000000000000000000
         run: |
           npm ci --no-audit --no-fund
+          npm audit --omit=dev --audit-level=high
+          git ls-files '*.js' | while read -r file; do node --check "$file"; done
+          npm run test:public-page
           npm run test:manutd
           npm run test:native-newznab
+          npm run test:nuvio
 
-      - name: Commit metadata update
+      - name: Commit metadata update to review branch
+        id: changes
         working-directory: product
         run: |
-          if git diff --quiet; then exit 0; fi
+          if [[ -z "$(git status --porcelain)" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          source_sha="$(git -C ../source rev-parse HEAD)"
+          sync_branch="automation/metadata-sync"
           git config user.name "nzb-sport-pro-sync[bot]"
           git config user.email "nzb-sport-pro-sync[bot]@users.noreply.github.com"
+          git checkout -B "$sync_branch"
           git add --all
-          git commit -m "Sync SeriousSportSync metadata"
-          git push
+          git commit -m "Sync SeriousSportSync metadata from ${source_sha:0:12}"
+          git fetch origin "+refs/heads/${sync_branch}:refs/remotes/origin/${sync_branch}" || true
+          git push --force-with-lease origin "HEAD:refs/heads/${sync_branch}"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "sync_branch=$sync_branch" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update metadata review
+        if: steps.changes.outputs.changed == 'true'
+        working-directory: product
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.changes.outputs.source_sha }}
+          SYNC_BRANCH: ${{ steps.changes.outputs.sync_branch }}
+        run: |
+          title="Sync SeriousSportSync metadata from ${SOURCE_SHA:0:12}"
+          body="Automated metadata-boundary update from [SeriousSportSync commit ${SOURCE_SHA:0:12}](https://github.com/Monkfish1337/Serioussportsync/commit/${SOURCE_SHA}).
+
+          The sync workflow copied only paths declared in \`metadata-sync.json\` and passed NSP syntax, dependency, public configuration, metadata, and playback compatibility checks. Review the file diff before merging; merging to \`main\` triggers the verified NSP container release."
+          existing="$(gh pr list --base main --head "$SYNC_BRANCH" --state open --json url --jq '.[0].url // empty')"
+          if [[ -n "$existing" ]]; then
+            gh pr edit "$existing" --title "$title" --body "$body"
+            echo "Updated $existing" >> "$GITHUB_STEP_SUMMARY"
+          else
+            created="$(gh pr create --base main --head "$SYNC_BRANCH" --title "$title" --body "$body")"
+            echo "Opened $created" >> "$GITHUB_STEP_SUMMARY"
+          fi

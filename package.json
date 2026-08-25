@@ -1,6 +1,6 @@
 {
     "name": "nzb-sport-pro",
-    "version": "0.4.13",
+    "version": "0.4.14",
     "description": "Public-ready sports metadata addon with private per-user Newznab discovery and TorBox Usenet playback.",
     "main": "server.js",
     "scripts": {
@@ -14,7 +14,7 @@
         "test:prowlarr": "node scripts/test-prowlarr-hydration.js",
         "test:torbox-voyager": "node scripts/test-torbox-voyager.js",
         "test:native-newznab": "node scripts/test-native-newznab.js && node scripts/test-torbox-usenet.js && node scripts/test-newznab-encryption.js && node scripts/test-request-guard.js",
-        "test:public-page": "node scripts/test-public-page.js && node scripts/test-setup-security.js && node scripts/test-admin-maintenance.js && node scripts/test-redaction.js",
+        "test:public-page": "node scripts/test-public-page.js && node scripts/test-setup-security.js && node scripts/test-admin-maintenance.js && node scripts/test-metadata-sync-status.js && node scripts/test-redaction.js",
         "preflight:public": "node scripts/preflight-public-host.js .env",
         "smoke:public": "node scripts/smoke-public-host.js",
         "sync:metadata": "node scripts/sync-metadata.js"

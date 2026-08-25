@@ -1,6 +1,7 @@
 {
   "sourceRepository": "Monkfish1337/Serioussportsync",
   "sourceBranch": "main",
+  "productRepository": "Monkfish1337/NZB-Sport-Pro",
   "paths": [
     "lib/catalog.js",
     "lib/catalog-order.js",

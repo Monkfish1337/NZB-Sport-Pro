@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.14
+
+### Reviewable metadata synchronization
+
+- Replaced direct metadata-sync pushes to `main` with a tested, reviewable
+  sync branch and pull request.
+- Recorded a deterministic digest for the declared SSS metadata boundary and
+  stopped creating releases for unrelated upstream commits.
+- Added an admin Metadata sync page and Health card showing snapshot integrity,
+  the pinned SSS commit, acceptance time, managed paths, and workflow links.
+- Included metadata provenance files in the production container and added
+  tamper, missing-path, admin authorization, and rendering coverage.
+
 ## 0.4.13
 
 ### Recovery drill reliability

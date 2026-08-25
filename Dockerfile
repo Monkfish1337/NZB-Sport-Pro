@@ -19,6 +19,7 @@ RUN apk add --no-cache tini wget && \
 # Copy production deps from the build stage and the source from the build context.
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
+COPY metadata-sync.json .metadata-source.json ./
 COPY server.js addon.js config.js ./
 COPY lib ./lib
 COPY scripts ./scripts
