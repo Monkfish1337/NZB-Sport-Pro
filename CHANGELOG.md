@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.9
+
+### Public-host operations
+
+- Added a read-only environment/origin preflight and an external HTTPS smoke
+  test covering health, store integrity, security headers, login, and setup
+  retirement.
+- Replaced stale SeriousSportSync stack backups with NZB-Sport-Pro data-volume
+  backups, checksums, retention, systemd units, and restore instructions.
+- Kept `.env` and `SESSION_SECRET` out of data archives so the documented
+  split-secret recovery boundary is preserved.
+- Documented Cloudflare edge limits, launch tests, recovery drills, and optional
+  GitHub branch protection.
+
 ## 0.4.8
 
 ### Verified container publishing

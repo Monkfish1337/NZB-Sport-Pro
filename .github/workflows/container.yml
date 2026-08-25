@@ -33,6 +33,17 @@ jobs:
         run: |
           set -e
           git ls-files '*.js' | while read -r file; do node --check "$file"; done
+      - name: Public-host operations checks
+        env:
+          SESSION_SECRET: preflight-session-secret-000000000000000000000000
+          SETUP_TOKEN: preflight-setup-token-000000000000
+          ADMIN_USER: operator
+          ADMIN_PASSWORD: preflight-admin-password
+          PUBLIC_URL: https://nzb.example.test
+          TRUST_PROXY_HEADERS: cloudflare
+        run: |
+          bash -n deploy/backup/backup-stack.sh deploy/backup/install-backup.sh
+          node scripts/preflight-public-host.js .missing-ci-env
       - name: Product and playback tests
         env:
           SESSION_SECRET: ci-only-do-not-use-in-prod-0000000000000000000000000000000000

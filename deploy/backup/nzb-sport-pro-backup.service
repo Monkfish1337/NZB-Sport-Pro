@@ -1,0 +1,15 @@
+[Unit]
+Description=NZB-Sport-Pro encrypted data backup
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/default/nzb-sport-pro-backup
+ExecStart=/usr/local/sbin/nzb-sport-pro-backup
+User=root
+Group=root
+UMask=0077
+TimeoutStartSec=1200
+Nice=15
+IOSchedulingClass=idle

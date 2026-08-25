@@ -105,6 +105,8 @@ volumes:
 For a Cloudflare Tunnel deployment, keep the Compose port bound to
 `127.0.0.1`, set an exact HTTPS `PUBLIC_URL`, use a distinct `SETUP_TOKEN`, and
 do not create a public DNS record that exposes the origin by another route.
+The complete edge-limit, backup/restore, smoke-test, and repository-protection
+procedure is in [`docs/public-hosting.md`](docs/public-hosting.md).
 
 ### Backup and restore
 

@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily NZB-Sport-Pro encrypted data backup
+
+[Timer]
+OnCalendar=*-*-* 03:15:00
+RandomizedDelaySec=300
+Persistent=true
+Unit=nzb-sport-pro-backup.service
+
+[Install]
+WantedBy=timers.target
