@@ -6,8 +6,11 @@
 
 - Added an opt-in, per-user native Newznab search pipeline that keeps indexer
   API keys encrypted and credential-bearing NZB links out of client responses.
-- Deferred NZB retrieval until play-click, bounded it in memory, uploaded it
-  directly to the user's TorBox Usenet account, and discarded local bytes.
+- Added bounded in-memory NZB preparation and a batched TorBox shared-cache
+  check, producing distinct instant-play and explicit queue rows.
+- Cached clicks use TorBox cached-only creation; uncached content is not added
+  to a user's account until its queue row is clicked. SSS never stores NZBs on
+  disk or proxies media.
 - Added independent GUI enable switches for TorBox torrents, Usenet Ultimate,
   Easynews, and native Newznab without clearing saved credentials.
 - Assigned enabled experimental deployments a separate addon ID and name so

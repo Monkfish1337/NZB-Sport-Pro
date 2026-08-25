@@ -45,11 +45,19 @@ async function main() {
   assert.strictEqual(resolved.url, 'https://cdn.torbox.app/match.mkv');
   assert.strictEqual(resolved.id, 77);
   assert.ok(calls.some((call) => call.url.includes('usenet_id=77')));
+  const cacheCall = calls.find((call) => call.url.includes('/usenet/checkcached'));
+  assert.strictEqual(cacheCall.options.method, 'POST');
+  assert.deepStrictEqual(JSON.parse(cacheCall.options.body), { hashes: [expectedHash] });
+  const createCall = calls.find((call) => call.url.endsWith('/usenet/createusenetdownload'));
+  assert.ok(createCall.options.body.includes(Buffer.from('name="add_only_if_cached"\r\n\r\ntrue')));
 
   const uncachedNzb = Buffer.from('<?xml version="1.0"?><nzb><file subject="new"/></nzb>');
-  async function uncachedFetch(url) {
+  async function uncachedFetch(url, options) {
     if (url.includes('/usenet/checkcached')) return response(200, { data: {} });
-    if (url.endsWith('/usenet/createusenetdownload')) return response(200, { data: { usenetdownload_id: 88 } });
+    if (url.endsWith('/usenet/createusenetdownload')) {
+      assert.ok(!options.body.includes(Buffer.from('name="add_only_if_cached"')));
+      return response(200, { data: { usenetdownload_id: 88 } });
+    }
     if (url.includes('/usenet/mylist')) return response(200, { data: { id: 88, files: [] } });
     throw new Error('unexpected URL ' + url);
   }
@@ -60,6 +68,10 @@ async function main() {
   assert.strictEqual(queued.ok, true);
   assert.strictEqual(queued.queued, true);
   assert.strictEqual(queued.id, 88);
+  const batch = torboxUsenet.cachedHashesFromPayload({
+    data: { [expectedHash]: { hash: expectedHash } },
+  }, [expectedHash, torboxUsenet.nzbHash(uncachedNzb)]);
+  assert.deepStrictEqual(Array.from(batch), [expectedHash]);
   console.log('TorBox Usenet cached/queued resolver tests passed');
 }
 

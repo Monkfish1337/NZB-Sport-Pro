@@ -60,12 +60,15 @@ async function main() {
     assert.strictEqual(results[0].size, 4000000000);
     assert.ok(results[0].nzbUrl.includes('apikey=secret-indexer-key'));
 
-    const token = nativeNewznab.storeCandidate('user-1', 'manutd:1', results[0]);
+    const preparedNzb = Buffer.from('prepared-nzb');
+    const token = nativeNewznab.storeCandidate('user-1', 'manutd:1', results[0], preparedNzb);
     assert.match(token, /^[a-f0-9]{40}$/);
     assert.ok(!token.includes('secret-indexer-key'));
     assert.strictEqual(nativeNewznab.getCandidate(token, 'wrong-user', 'manutd:1'), null);
     const candidate = nativeNewznab.getCandidate(token, 'user-1', 'manutd:1');
     assert.strictEqual(candidate.title, results[0].title);
+    assert.strictEqual(nativeNewznab.getPreparedNzb(token, 'user-1', 'manutd:1'), preparedNzb);
+    assert.strictEqual(nativeNewznab.getPreparedNzb(token, 'wrong-user', 'manutd:1'), null);
     assert.strictEqual(nativeNewznab.candidateStillConfigured(candidate, indexers), true);
     assert.strictEqual(nativeNewznab.candidateStillConfigured(candidate, [
       { name: 'Test Indexer', url: endpoint, apiKey: 'rotated-key' },

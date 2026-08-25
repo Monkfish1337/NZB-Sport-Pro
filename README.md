@@ -64,7 +64,7 @@ returns only the rows that finish within the configured request budget.
 | Companion scraper | TorBox | Combines Prowlarr, Zilean, Torznab, and other configured companion sources |
 | Usenet Ultimate | Usenet Ultimate / NzbDAV | Sends event title variants to the user's UU instance; UU searches its configured indexers and handles playback |
 | Easynews | Easynews | Searches and plays with credentials stored on the user's account |
-| Native Newznab (experimental) | TorBox Usenet | Searches only the current user's indexers; fetches and uploads an NZB in memory only after that row is clicked |
+| Native Newznab (experimental) | TorBox Usenet | Searches only the current user's indexers, checks TorBox's shared cache, and separates instant-play rows from queue actions |
 
 > **Usenet Ultimate compatibility:** direct sports-title search requires the
 > endpoint proposed in [Usenet Ultimate PR #46](https://github.com/DSmart33/Usenet-Ultimate/pull/46).
@@ -113,12 +113,14 @@ docker compose pull serioussportsync-test
 docker compose up -d --no-deps --force-recreate serioussportsync-test
 ~~~
 
-Searches are read-only. Credential-bearing result links stay in a short-lived
-server memory store and are represented in clients by opaque, signed tokens.
-Only after a user clicks a result does SSS fetch the selected NZB into bounded
-memory, upload it to that user's TorBox account, and discard the local bytes.
-Cached jobs play immediately where TorBox exposes their files; uncached jobs
-are queued and the user re-opens the event when ready.
+Search and TorBox cache checks are read-only. Credential-bearing result links
+stay in a short-lived server memory store and are represented in clients by
+opaque, signed tokens. SSS fetches only the top relevant NZBs into a bounded,
+expiring memory cache, hashes them, and checks TorBox's shared Usenet cache in
+one batch. `Instant Play` rows are attached to the user's account in
+cached-only mode when clicked; `Queue` rows begin processing only when clicked.
+Once a queued job completes, re-open the event and the shared-cache check will
+surface it as instant play. SSS never writes NZBs to disk or proxies media.
 
 For a future public deployment, private/local indexer targets, cross-host
 download links, and non-HTTPS endpoints are rejected by default. Local testing

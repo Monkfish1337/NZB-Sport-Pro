@@ -2063,8 +2063,8 @@ function renderAccountPage(user, opts) {
     +   '<div class="card-header"><h3 class="card-title">Native Newznab → TorBox Usenet <span class="badge bg-warning text-dark">Experimental</span></h3></div>'
     +   '<div class="card-body">'
     +     pipelineSwitch('nativeNewznabEnabled', cfg.nativeNewznabEnabled === true,
-            'Enable native Newznab pipeline', 'Search these indexers and upload only a clicked NZB to your own TorBox account.')
-    +     '<p class="text-secondary small">API keys are encrypted at rest. Search responses stay metadata-only; NZB links remain server-side, and selected NZB bytes are held in memory only long enough to upload to TorBox. Public HTTPS indexers are required by default.</p>'
+            'Enable native Newznab pipeline', 'Check TorBox shared cache and show separate instant-play and click-to-queue rows.')
+    +     '<p class="text-secondary small">API keys are encrypted at rest. SSS fetches only the top relevant NZBs into bounded, expiring memory for a batched cache check; links and bytes never reach the client or disk. Cached rows attach in cached-only mode, while uncached content enters your TorBox account only after its Queue row is clicked. Public HTTPS indexers are required by default.</p>'
     +     '<div id="newznab-indexers">' + newznabRows + '</div>'
     +     '<button class="btn btn-outline-primary btn-sm" id="newznab-add" type="button">Add indexer</button>'
     +     '<span class="text-secondary small ms-2">Maximum ' + nativeNewznab.MAX_INDEXERS + '</span>'

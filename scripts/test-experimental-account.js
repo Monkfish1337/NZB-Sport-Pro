@@ -1,4 +1,5 @@
 const assert = require('assert');
+const crypto = require('crypto');
 const fs = require('fs');
 const http = require('http');
 const os = require('os');
@@ -18,37 +19,59 @@ const fetch = require('node-fetch');
 
 async function main() {
   let torboxUploadCount = 0;
+  let nzbFetchCount = 0;
+  let cachedOnlyCreateCount = 0;
+  const cachedNzb = Buffer.from('<?xml version="1.0"?><nzb><file subject="cached-match"/></nzb>');
+  const queuedNzb = Buffer.from('<?xml version="1.0"?><nzb><file subject="queued-match"/></nzb>');
+  const cachedHash = crypto.createHash('md5').update(cachedNzb).digest('hex');
   const mockServer = http.createServer((req, res) => {
     const requestUrl = new URL(req.url, 'http://127.0.0.1');
     const origin = 'http://127.0.0.1:' + mockServer.address().port;
     if (requestUrl.pathname === '/api' && requestUrl.searchParams.get('t') === 'search') {
       res.setHeader('Content-Type', 'application/rss+xml');
       return res.end('<rss xmlns:newznab="http://www.newznab.com/DTD/2010/feeds/attributes/"><channel><item>'
-        + '<title>EPL 2026 08 22 Hull City Vs Manchester United 1080p HDTV H264-DARKSPORT</title>'
-        + '<link>' + origin + '/api?t=get&amp;id=match&amp;apikey=newznab-secret</link>'
-        + '<guid>match-release</guid><pubDate>Sat, 22 Aug 2026 20:00:00 GMT</pubDate>'
-        + '<newznab:attr name="size" value="4000000000"/></item></channel></rss>');
+        + '<title>EPL 2026 08 22 Hull City Vs Manchester United Main Card 1080p HDTV H264-DARKSPORT</title>'
+        + '<link>' + origin + '/api?t=get&amp;id=cached&amp;apikey=newznab-secret</link>'
+        + '<guid>cached-release</guid><pubDate>Sat, 22 Aug 2026 20:00:00 GMT</pubDate>'
+        + '<newznab:attr name="size" value="4000000000"/></item><item>'
+        + '<title>EPL 2026 08 22 Hull City Vs Manchester United Prelims 720p HDTV H264-DARKSPORT</title>'
+        + '<link>' + origin + '/api?t=get&amp;id=queued&amp;apikey=newznab-secret</link>'
+        + '<guid>queued-release</guid><pubDate>Sat, 22 Aug 2026 19:00:00 GMT</pubDate>'
+        + '<newznab:attr name="size" value="2000000000"/></item></channel></rss>');
     }
     if (requestUrl.pathname === '/api' && requestUrl.searchParams.get('t') === 'get') {
+      nzbFetchCount += 1;
       res.setHeader('Content-Type', 'application/x-nzb');
-      return res.end('<?xml version="1.0"?><nzb><file subject="match"/></nzb>');
+      return res.end(requestUrl.searchParams.get('id') === 'cached' ? cachedNzb : queuedNzb);
     }
     if (requestUrl.pathname === '/v1/api/usenet/checkcached') {
-      const hash = requestUrl.searchParams.get('hash');
-      res.setHeader('Content-Type', 'application/json');
-      return res.end(JSON.stringify({ data: { [hash]: { hash } } }));
+      const chunks = [];
+      req.on('data', (chunk) => chunks.push(chunk));
+      return req.on('end', () => {
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        assert.ok(body.hashes.includes(cachedHash));
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ data: { [cachedHash]: { hash: cachedHash } } }));
+      });
     }
     if (requestUrl.pathname === '/v1/api/usenet/createusenetdownload') {
       torboxUploadCount += 1;
-      req.resume();
-      res.setHeader('Content-Type', 'application/json');
-      return req.on('end', () => res.end(JSON.stringify({ data: { usenet_id: 77 } })));
+      const chunks = [];
+      req.on('data', (chunk) => chunks.push(chunk));
+      return req.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8');
+        const cached = body.includes('cached-match');
+        if (cached && body.includes('name="add_only_if_cached"\r\n\r\ntrue')) cachedOnlyCreateCount += 1;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ data: { usenet_id: cached ? 77 : 88 } }));
+      });
     }
     if (requestUrl.pathname === '/v1/api/usenet/mylist') {
+      const id = Number(requestUrl.searchParams.get('id'));
       res.setHeader('Content-Type', 'application/json');
-      return res.end(JSON.stringify({ data: { id: 77, files: [
+      return res.end(JSON.stringify({ data: id === 77 ? { id: 77, files: [
         { id: 2, name: 'match.1080p.mkv', size: 4000000000 },
-      ] } }));
+      ] } : { id: 88, files: [] } }));
     }
     if (requestUrl.pathname === '/v1/api/usenet/requestdl') {
       assert.strictEqual(requestUrl.searchParams.get('token'), 'torbox-secret');
@@ -145,15 +168,26 @@ async function main() {
       + '/stream/movie/' + encodeURIComponent(event.id) + '.json');
     const streamPayload = await streamResponse.json();
     const nativeRows = streamPayload.streams.filter((row) => /TorBox Usenet/.test(row.name || ''));
-    assert.strictEqual(nativeRows.length, 1);
+    assert.strictEqual(nativeRows.length, 2);
+    assert.match(nativeRows[0].name, /Instant Play/);
+    assert.match(nativeRows[1].name, /Queue/);
     assert.ok(nativeRows[0].url.includes('/resolve/torbox-usenet/'));
     assert.ok(!JSON.stringify(nativeRows[0]).includes('newznab-secret'));
     assert.ok(!JSON.stringify(nativeRows[0]).includes(indexerEndpoint));
+    const repeatedStream = await fetch(base + '/u/' + user.id + '/' + user.apiToken
+      + '/stream/movie/' + encodeURIComponent(event.id) + '.json');
+    const repeatedPayload = await repeatedStream.json();
+    assert.strictEqual(repeatedPayload.streams.filter((row) => /TorBox Usenet/.test(row.name || '')).length, 2);
+    assert.strictEqual(nzbFetchCount, 2, 'repeated stream discovery reuses prepared NZBs');
     const played = await fetch(nativeRows[0].url, { redirect: 'manual' });
     assert.strictEqual(played.status, 302);
     assert.strictEqual(played.headers.get('location'), mockOrigin + '/video.mp4');
-    assert.strictEqual(torboxUploadCount, 1);
-    console.log('experimental account UI, switches, encrypted config, manifest, stream row, and play resolve passed');
+    const queued = await fetch(nativeRows[1].url, { redirect: 'manual' });
+    assert.strictEqual(queued.status, 425);
+    assert.strictEqual(torboxUploadCount, 2);
+    assert.strictEqual(cachedOnlyCreateCount, 1);
+    assert.strictEqual(nzbFetchCount, 2, 'prepared NZBs are reused on click without a second indexer grab');
+    console.log('experimental account UI, instant/queue rows, bounded NZB reuse, and both play paths passed');
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await new Promise((resolve) => mockServer.close(resolve));
