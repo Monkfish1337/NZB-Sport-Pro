@@ -2,9 +2,9 @@
 
 ## Origin and tunnel
 
-Keep the supplied `127.0.0.1:7000:7000` binding and point Cloudflare Tunnel at
-`http://localhost:7000`. Do not add a router port-forward or a second public
-route to the origin.
+Keep a loopback-only binding such as `127.0.0.1:7001:7000` and point Cloudflare
+Tunnel at that host port, for example `http://localhost:7001`. Do not add a
+router port-forward or a second public route to the origin.
 
 ```bash
 node scripts/preflight-public-host.js .env
@@ -36,7 +36,7 @@ The timer archives `/app/data` only. It excludes `.env`, because combining the
 encrypted store with its `SESSION_SECRET` removes split-secret protection.
 
 ```bash
-sudo NZB_STACK_DIR="$PWD" ./deploy/backup/install-backup.sh
+sudo NZB_STACK_DIR="$PWD" NZB_COMPOSE_SERVICE="your-compose-service" ./deploy/backup/install-backup.sh
 sudo systemctl start nzb-sport-pro-backup.service
 sudo journalctl -u nzb-sport-pro-backup.service --since='10 minutes ago'
 ```

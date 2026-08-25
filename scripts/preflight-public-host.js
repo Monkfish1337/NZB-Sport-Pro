@@ -61,8 +61,8 @@ for (const name of [
 
 const composePath = path.resolve('docker-compose.yml');
 if (!fs.existsSync(composePath)
-    || !/127\.0\.0\.1:7000:7000/.test(fs.readFileSync(composePath, 'utf8'))) {
-  errors.push('docker-compose.yml must bind port 7000 to 127.0.0.1 only.');
+    || !/127\.0\.0\.1:[0-9]{1,5}:7000/.test(fs.readFileSync(composePath, 'utf8'))) {
+  errors.push('docker-compose.yml must bind container port 7000 to a 127.0.0.1 host port only.');
 }
 if (fs.existsSync(envPath) && process.platform !== 'win32') {
   const mode = fs.statSync(envPath).mode & 0o777;

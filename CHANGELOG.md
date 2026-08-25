@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.10
+
+### Flexible Compose topology
+
+- Allowed any loopback host port mapped to the fixed container port 7000 in
+  the public-host preflight.
+- Made the Compose service name configurable for backup installation and runs,
+  supporting existing stacks whose service retains a legacy name.
+
 ## 0.4.9
 
 ### Public-host operations

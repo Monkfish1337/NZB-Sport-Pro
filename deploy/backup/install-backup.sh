@@ -6,6 +6,7 @@ SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
 STACK_DIR="${NZB_STACK_DIR:-$(pwd)}"
 BACKUP_ROOT="${NZB_BACKUP_ROOT:-/mnt/storage/backups/nzb-sport-pro}"
 KEEP_COUNT="${NZB_BACKUP_KEEP_COUNT:-14}"
+SERVICE="${NZB_COMPOSE_SERVICE:-nzb-sport-pro}"
 
 if [[ ! -f "${STACK_DIR}/docker-compose.yml" ]]; then
   echo "ERROR: run from the NZB-Sport-Pro stack directory or set NZB_STACK_DIR." >&2
@@ -20,6 +21,7 @@ install -d -m 0755 /etc/default
   printf 'NZB_STACK_DIR=%q\n' "${STACK_DIR}"
   printf 'NZB_BACKUP_ROOT=%q\n' "${BACKUP_ROOT}"
   printf 'NZB_BACKUP_KEEP_COUNT=%q\n' "${KEEP_COUNT}"
+  printf 'NZB_COMPOSE_SERVICE=%q\n' "${SERVICE}"
 } > /etc/default/nzb-sport-pro-backup
 chmod 600 /etc/default/nzb-sport-pro-backup
 

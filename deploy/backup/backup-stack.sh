@@ -7,7 +7,7 @@ set -euo pipefail
 STACK_DIR="${NZB_STACK_DIR:-/mnt/storage/nzb-sport-pro}"
 BACKUP_ROOT="${NZB_BACKUP_ROOT:-/mnt/storage/backups/nzb-sport-pro}"
 KEEP_COUNT="${NZB_BACKUP_KEEP_COUNT:-14}"
-SERVICE="nzb-sport-pro"
+SERVICE="${NZB_COMPOSE_SERVICE:-nzb-sport-pro}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 STAGE="$(mktemp -d -t nzb-sport-pro-backup-XXXXXX)"
 OUTPUT="${BACKUP_ROOT}/nzb-sport-pro-data-${STAMP}.tar.gz"
