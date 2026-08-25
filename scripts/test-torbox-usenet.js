@@ -10,6 +10,18 @@ function response(status, payload) {
 }
 
 async function main() {
+  const connection = await torboxUsenet.testConnection('connection-key', {
+    fetchImpl: async (url, options) => {
+      assert.match(url, /\/usenet\/mylist\?/);
+      assert.strictEqual(options.headers.Authorization, 'Bearer connection-key');
+      return response(200, { data: [] });
+    },
+  });
+  assert.deepStrictEqual(connection, { ok: true, status: 200 });
+  assert.deepStrictEqual(await torboxUsenet.testConnection('bad-key', {
+    fetchImpl: async () => response(401, {}),
+  }), { ok: false, status: 401, error: 'invalid-key' });
+
   const messageId = 'cached-match-part1@news.example';
   const secondMessageId = 'cached-match-par2@news.example';
   const nzb = Buffer.from('<?xml version="1.0"?><nzb><!-- indexer comment -->'

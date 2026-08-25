@@ -1,4 +1,5 @@
 const assert = require('assert');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -13,6 +14,8 @@ process.env.SESSION_SECRET = 'public-page-test-secret-at-least-32-characters';
 
 const { createApp } = require('../addon');
 const streams = require('../lib/streams');
+const torboxUsenet = require('../lib/sources/torbox-usenet');
+const nativeNewznab = require('../lib/sources/native-newznab');
 
 (async () => {
   const sizeLogs = [];
@@ -42,8 +45,38 @@ const streams = require('../lib/streams');
     assert.match(configureHtml, />Copy Manifest</);
     assert.match(configureHtml, />Download Collection</);
     assert.match(configureHtml, />Copy JSON</);
+    assert.match(configureHtml, /id="save-edits"[^>]*>Save edits</);
+    assert.match(configureHtml, /id="rotate-manifest"/);
+    assert.match(configureHtml, /id="delete-config"/);
+    assert.match(configureHtml, /id="test-services"/);
+    assert.match(configureHtml, /Changes saved\. Your manifest is up to date\./);
     assert.doesNotMatch(configureHtml, /Direct indexer-link attachment/);
     assert.doesNotMatch(configureHtml, /Create your install|Create account|Username/);
+
+    const originalTorBoxTest = torboxUsenet.testConnection;
+    const originalNewznabTest = nativeNewznab.testConnection;
+    torboxUsenet.testConnection = async (key) => ({ ok: key === 'torbox-test-key', status: 200 });
+    nativeNewznab.testConnection = async (indexer) => ({
+      ok: indexer.apiKey === 'indexer-test-key', status: 200,
+    });
+    const tested = await fetch(base + '/configure/test-services', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        torboxApiKey: 'torbox-test-key',
+        newznabIndexers: [{
+          name: 'Test Indexer', url: 'https://indexer.example/api', apiKey: 'indexer-test-key',
+        }],
+      }),
+    });
+    const testReport = await tested.json();
+    torboxUsenet.testConnection = originalTorBoxTest;
+    nativeNewznab.testConnection = originalNewznabTest;
+    assert.strictEqual(tested.status, 200);
+    assert.strictEqual(testReport.ok, true);
+    assert.strictEqual(testReport.torbox.message, 'Connected successfully.');
+    assert.strictEqual(testReport.indexers[0].name, 'Test Indexer');
+    assert.doesNotMatch(JSON.stringify(testReport), /torbox-test-key|indexer-test-key/);
 
     const generated = await fetch(base + '/configure/token', {
       method: 'POST',
@@ -69,6 +102,22 @@ const streams = require('../lib/streams');
     assert.match(links.configureUrl, /^\/configure#edit=pe1\./);
     assert.match(links.editUrl, /^http:\/\/127\.0\.0\.1:\d+\/configure#edit=pe1\./);
     assert.doesNotMatch(links.manifestUrl, /torbox-secret-value|newznab-secret-value|NZBGeek/);
+
+    // Records created before manifest rotation had no access nonce. Confirm
+    // their original use-only tokens remain valid after upgrading.
+    const publicState = JSON.parse(fs.readFileSync(process.env.PUBLIC_CONFIGS_FILE, 'utf8'));
+    const storedRecord = publicState.records[0];
+    const savedNonce = storedRecord.accessNonce;
+    delete storedRecord.accessNonce;
+    fs.writeFileSync(process.env.PUBLIC_CONFIGS_FILE, JSON.stringify(publicState, null, 2));
+    const master = crypto.createHmac('sha256', process.env.SESSION_SECRET)
+      .update('nzb-sport-pro:public-config-store:access').digest();
+    const legacySignature = crypto.createHmac('sha256', master)
+      .update(storedRecord.id).digest('base64url');
+    const legacyManifestUrl = base + '/c/pc1.' + storedRecord.id + '.' + legacySignature + '/manifest.json';
+    assert.strictEqual((await fetch(legacyManifestUrl)).status, 200);
+    storedRecord.accessNonce = savedNonce;
+    fs.writeFileSync(process.env.PUBLIC_CONFIGS_FILE, JSON.stringify(publicState, null, 2));
 
     const manifest = await (await fetch(links.manifestUrl)).json();
     assert.strictEqual(manifest.id, 'community.nzbsportpro');
@@ -137,7 +186,28 @@ const streams = require('../lib/streams');
     });
     assert.strictEqual(invalid.status, 400);
 
-    console.log('stored configure, split edit token, manifest, collection, and tamper tests passed');
+    const rotated = await fetch(base + '/configure/rotate-manifest', {
+      method: 'POST', headers: { authorization: 'Bearer ' + editToken },
+    });
+    const rotatedLinks = await rotated.json();
+    assert.strictEqual(rotated.status, 200);
+    assert.notStrictEqual(rotatedLinks.manifestUrl, links.manifestUrl);
+    assert.strictEqual((await fetch(links.manifestUrl)).status, 404);
+    assert.strictEqual((await fetch(rotatedLinks.manifestUrl)).status, 200);
+    assert.strictEqual((await fetch(base + '/configure/edit', {
+      method: 'POST', headers: { authorization: 'Bearer ' + editToken },
+    })).status, 200);
+
+    const deleted = await fetch(base + '/configure/delete', {
+      method: 'POST', headers: { authorization: 'Bearer ' + editToken },
+    });
+    assert.strictEqual(deleted.status, 200);
+    assert.strictEqual((await fetch(rotatedLinks.manifestUrl)).status, 404);
+    assert.strictEqual((await fetch(base + '/configure/edit', {
+      method: 'POST', headers: { authorization: 'Bearer ' + editToken },
+    })).status, 404);
+
+    console.log('stored configure, split edit token, lifecycle, manifest, collection, and tamper tests passed');
   } finally {
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(tempRoot, { recursive: true, force: true });

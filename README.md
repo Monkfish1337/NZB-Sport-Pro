@@ -28,6 +28,10 @@ generated private manifest. There is no public signup or user dashboard.
 - Keeps NZB URLs and bytes in bounded server memory and out of client responses.
 - Offers an optional per-user maximum result size, filtering oversized releases
   before NZB preparation and TorBox cache checks to favour quicker queue playback.
+- Tests TorBox and Newznab settings before installation with one read-only
+  request per service; the indexer check consumes one API search hit.
+- Lets users rotate a manifest if its use-only URL is exposed, or permanently
+  delete their encrypted configuration through the private editing link.
 - Never downloads or proxies video data.
 
 TorBox does not reliably expose its global Usenet cache for arbitrary personal
@@ -112,6 +116,13 @@ use of its services, and protect the editing link because it can display and
 change the saved credentials. Its `#edit=` fragment is not sent in HTTP request
 paths or normal reverse-proxy access logs.
 
+The configurator's **Test services** action does not save the form. It makes a
+read-only TorBox library request and a one-result Newznab search against each
+configured indexer, then reports provider-safe connection errors without
+returning keys or response bodies to the browser. **Rotate manifest** immediately
+invalidates the old install URL while retaining the private editing link.
+**Delete configuration** permanently invalidates both URLs.
+
 The operator dashboard is separate and optional. Visit `/setup` explicitly to
 create its first administrator, then use `/login`, `/account`, and `/admin` for
 the retained maintenance tools. When `PUBLIC_URL` is HTTPS, first-admin setup
@@ -165,7 +176,7 @@ limits and abuse controls before advertising it widely.
 
 ## Development
 
-Requires Node.js 20 or later.
+Requires Node.js 24 or later.
 
 ~~~bash
 npm ci

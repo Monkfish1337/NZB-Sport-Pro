@@ -30,6 +30,7 @@ const { cleanOrder, orderByIds } = require('./lib/catalog-order');
 const { effectiveCatalogSelection, CURRENT_DEFAULTS_VERSION } = require('./lib/catalog-selection');
 const { buildNuvioCollections } = require('./lib/nuvio-collections');
 const torboxVoyager = require('./lib/sources/torbox-voyager');
+const torboxUsenet = require('./lib/sources/torbox-usenet');
 const nativeNewznab = require('./lib/sources/native-newznab');
 const publicPage = require('./lib/public-page');
 const publicConfig = require('./lib/public-config');
@@ -111,6 +112,14 @@ const configureWriteLimit = requestGuard.fixedWindow({
 const configureReadLimit = requestGuard.fixedWindow({
   name: 'configure-read', windowMs: process.env.CONFIGURE_EDIT_RATE_LIMIT_WINDOW_MS || 60000,
   max: process.env.CONFIGURE_EDIT_RATE_LIMIT_MAX || 10, key: clientIp,
+});
+const configureTestLimit = requestGuard.fixedWindow({
+  name: 'configure-test', windowMs: process.env.CONFIGURE_TEST_RATE_LIMIT_WINDOW_MS || 60000,
+  max: process.env.CONFIGURE_TEST_RATE_LIMIT_MAX || 5, key: clientIp,
+});
+const configureLifecycleLimit = requestGuard.fixedWindow({
+  name: 'configure-lifecycle', windowMs: process.env.CONFIGURE_LIFECYCLE_RATE_LIMIT_WINDOW_MS || 60000,
+  max: process.env.CONFIGURE_LIFECYCLE_RATE_LIMIT_MAX || 5, key: clientIp,
 });
 const streamIpLimit = requestGuard.fixedWindow({
   name: 'stream', windowMs: process.env.STREAM_RATE_LIMIT_WINDOW_MS || 15000,
@@ -390,6 +399,63 @@ function createApp() {
     }, { cacheControl: 'no-store' });
   });
 
+  function connectionMessage(result, service) {
+    if (result && result.ok) return 'Connected successfully.';
+    const code = result && result.error;
+    if (code === 'missing-key' || code === 'invalid-key') return 'The API key was rejected.';
+    if (code === 'rate-limited') return 'The service rate-limited the check. Try again shortly.';
+    if (code === 'timeout') return 'The service did not respond before the timeout.';
+    if (code === 'blocked-address') return 'The address was blocked by the public-host security policy.';
+    if (code === 'invalid-config') return 'The service settings are incomplete or invalid.';
+    if (code === 'provider-error') return 'The provider returned a Newznab API error.';
+    if (code === 'unexpected-response') return 'The endpoint responded, but not as a Newznab API.';
+    if (result && result.status) return service + ' returned HTTP ' + result.status + '.';
+    return 'Could not reach the service.';
+  }
+
+  app.post('/configure/test-services', configureTestLimit, async (req, res) => {
+    try {
+      const clean = publicConfig.normaliseInput(req.body || {});
+      const [torbox, indexers] = await Promise.all([
+        torboxUsenet.testConnection(clean.torboxApiKey),
+        Promise.all(clean.newznabIndexers.map(async (indexer) => {
+          const result = await nativeNewznab.testConnection(indexer);
+          return {
+            name: indexer.name,
+            ok: result.ok,
+            status: result.status || 0,
+            message: connectionMessage(result, 'Indexer'),
+          };
+        })),
+      ]);
+      const report = {
+        ok: Boolean(torbox.ok && indexers.every((item) => item.ok)),
+        torbox: {
+          ok: torbox.ok,
+          status: torbox.status || 0,
+          message: connectionMessage(torbox, 'TorBox'),
+        },
+        indexers,
+      };
+      return send(res, report, { cacheControl: 'no-store' });
+    } catch (err) {
+      return res.status(400).json({ ok: false, error: err.message || 'Invalid service settings.' });
+    }
+  });
+
+  function publicConfigurationLinks(req, saved) {
+    const origin = publicOriginFromReq(req).replace(/\/+$/, '');
+    const basePath = '/c/' + encodeURIComponent(saved.accessToken);
+    const manifestUrl = origin + basePath + '/manifest.json';
+    return {
+      manifestUrl,
+      installUrl: manifestUrl.replace(/^https?:\/\//i, 'stremio://'),
+      configureUrl: '/configure#edit=' + encodeURIComponent(saved.editToken),
+      editUrl: origin + '/configure#edit=' + encodeURIComponent(saved.editToken),
+      collectionUrl: origin + basePath + '/nuvio-collections.json',
+    };
+  }
+
   app.post('/configure/token', configureWriteLimit, (req, res) => {
     try {
       const body = req.body || {};
@@ -409,20 +475,28 @@ function createApp() {
         ? publicConfigStore.update(editMatch[1], cleanConfig)
         : publicConfigStore.create(cleanConfig);
       if (!saved) return res.status(404).json({ ok: false, error: 'Invalid private editing link.' });
-      const token = saved.accessToken;
-      const origin = publicOriginFromReq(req).replace(/\/+$/, '');
-      const basePath = '/c/' + encodeURIComponent(token);
-      const manifestUrl = origin + basePath + '/manifest.json';
-      return send(res, {
-        manifestUrl,
-        installUrl: manifestUrl.replace(/^https?:\/\//i, 'stremio://'),
-        configureUrl: '/configure#edit=' + encodeURIComponent(saved.editToken),
-        editUrl: origin + '/configure#edit=' + encodeURIComponent(saved.editToken),
-        collectionUrl: origin + basePath + '/nuvio-collections.json',
-      }, { cacheControl: 'no-store' });
+      return send(res, publicConfigurationLinks(req, saved), { cacheControl: 'no-store' });
     } catch (err) {
       return res.status(400).json({ ok: false, error: err.message || 'Invalid configuration.' });
     }
+  });
+
+  app.post('/configure/rotate-manifest', configureLifecycleLimit, (req, res) => {
+    const auth = String(req.headers.authorization || '');
+    const match = /^Bearer\s+(.+)$/i.exec(auth);
+    const saved = match ? publicConfigStore.rotateAccess(match[1]) : null;
+    if (!saved) return res.status(404).json({ ok: false, error: 'Invalid private editing link.' });
+    return send(res, Object.assign({ ok: true }, publicConfigurationLinks(req, saved)), {
+      cacheControl: 'no-store',
+    });
+  });
+
+  app.post('/configure/delete', configureLifecycleLimit, (req, res) => {
+    const auth = String(req.headers.authorization || '');
+    const match = /^Bearer\s+(.+)$/i.exec(auth);
+    const removed = match && publicConfigStore.remove(match[1]);
+    if (!removed) return res.status(404).json({ ok: false, error: 'Invalid private editing link.' });
+    return send(res, { ok: true }, { cacheControl: 'no-store' });
   });
 
   app.post('/login', async (req, res) => {

@@ -22,6 +22,28 @@ function mockResponse(body, status, headers) {
 }
 
 async function main() {
+  const connection = await nativeNewznab.testConnection({
+    name: 'Connection Test', url: 'http://indexer.test/api', apiKey: 'caps-key',
+  }, {
+    fetchImpl: async (url) => {
+      assert.strictEqual(new URL(url).searchParams.get('t'), 'search');
+      assert.strictEqual(new URL(url).searchParams.get('limit'), '1');
+      assert.strictEqual(new URL(url).searchParams.get('apikey'), 'caps-key');
+      return mockResponse('<?xml version="1.0"?><rss><channel/></rss>', 200);
+    },
+  });
+  assert.deepStrictEqual(connection, { ok: true, status: 200 });
+  assert.deepStrictEqual(await nativeNewznab.testConnection({
+    name: 'Bad Key', url: 'http://indexer.test/api', apiKey: 'bad-key',
+  }, { fetchImpl: async () => mockResponse('', 401) }), {
+    ok: false, status: 401, error: 'invalid-key',
+  });
+  assert.deepStrictEqual(await nativeNewznab.testConnection({
+    name: 'API Error', url: 'http://indexer.test/api', apiKey: 'error-key',
+  }, { fetchImpl: async () => mockResponse('<error code="100" description="Incorrect API key"/>', 200) }), {
+    ok: false, status: 200, error: 'provider-error',
+  });
+
   let searchCount = 0;
   let leakedKey = false;
   const server = http.createServer((req, res) => {

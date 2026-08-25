@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.4.2
+
+### Safer public configuration management
+
+- Added a prominent Save edits action with a clear confirmation before the
+  Stremio and Nuvio install tools.
+- Added read-only TorBox and Newznab connection tests with specific feedback
+  for rejected keys, rate limits, timeouts, blocked addresses, provider API
+  errors, and endpoints that do not return Newznab XML.
+- Added manifest rotation without changing the private editing link, allowing
+  a user to invalidate and reinstall a leaked use-only manifest.
+- Added permanent deletion of a stored public configuration, invalidating both
+  its manifest and private editing link.
+- Separated configure, connection-test, edit, and lifecycle rate-limit buckets
+  so normal configuration management cannot exhaust an unrelated action.
+
+## 0.4.1
+
+### Faster-playback result sizing
+
+- Added an optional per-user maximum result size, applied before NZB
+  preparation and TorBox cache checks while retaining results without size
+  metadata.
+- Corrected maximum-stream enforcement after relevance and size filtering.
+
+## 0.4.0
+
+### Public-host security and privacy hardening
+
+- Split the installed use-only manifest capability from the private editing
+  capability, keeping editing secrets in browser URL fragments and
+  authorization headers rather than request paths.
+- Moved public configurations into an encrypted persistent store with bounded
+  capacity and strict file permissions.
+- Added public-origin validation, secure response headers, request-body limits,
+  setup protection, central secret redaction, and stream/resolve rate and
+  concurrency controls.
+- Added DNS pinning and private-address protection for user-configured Newznab
+  endpoints, including strict redirect handling and bounded response bodies.
+- Updated the container runtime to Node.js 24 and verified the production
+  dependency tree without known audit findings at release time.
+
 ## 0.3.2
 
 ### Long TorBox processing without exhausting player redirects
