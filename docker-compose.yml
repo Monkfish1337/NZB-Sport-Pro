@@ -13,13 +13,20 @@ services:
       TSDB_API_KEY: "${TSDB_API_KEY:-123}"
       TSDB_SEASONS: "${TSDB_SEASONS:-auto}"
       REFRESH_INTERVAL_HOURS: "${REFRESH_INTERVAL_HOURS:-6}"
-      # Encrypts stateless private manifest configurations and operator login.
+      # Encrypts saved public configurations and protects operator login.
       SESSION_SECRET: "${SESSION_SECRET}"
+      PUBLIC_URL: "${PUBLIC_URL}"
+      SETUP_TOKEN: "${SETUP_TOKEN:-}"
+      # Safe only when the published port is loopback-only and cloudflared is
+      # the sole public entry point.
+      TRUST_PROXY_HEADERS: "${TRUST_PROXY_HEADERS:-cloudflare}"
       ADMIN_USER: "${ADMIN_USER:-}"
     volumes:
       - nzb_sport_pro_data:/app/data
     ports:
-      - "7000:7000"
+      # Keep the origin off the LAN/Internet; point a host cloudflared tunnel
+      # at http://localhost:7000. Change deliberately for another topology.
+      - "127.0.0.1:7000:7000"
 
 volumes:
   nzb_sport_pro_data:

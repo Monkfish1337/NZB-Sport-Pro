@@ -8,6 +8,7 @@ process.env.DATA_FILE = path.join(tempRoot, 'events.json');
 process.env.USERS_FILE = path.join(tempRoot, 'users.json');
 process.env.CONTENT_STUDIO_FILE = path.join(tempRoot, 'content-studio.json');
 process.env.SETTINGS_FILE = path.join(tempRoot, 'settings.json');
+process.env.PUBLIC_CONFIGS_FILE = path.join(tempRoot, 'public-configs.json');
 process.env.SESSION_SECRET = 'public-page-test-secret-at-least-32-characters';
 
 const { createApp } = require('../addon');
@@ -51,10 +52,11 @@ const { createApp } = require('../addon');
     });
     const links = await generated.json();
     assert.strictEqual(generated.status, 200);
-    assert.match(links.manifestUrl, /^http:\/\/127\.0\.0\.1:\d+\/c\/v1\./);
+    assert.match(links.manifestUrl, /^http:\/\/127\.0\.0\.1:\d+\/c\/pc1\./);
     assert.match(links.manifestUrl, /\/manifest\.json$/);
     assert.match(links.installUrl, /^stremio:\/\//);
-    assert.match(links.configureUrl, /^\/c\/v1\..+\/configure$/);
+    assert.match(links.configureUrl, /^\/configure#edit=pe1\./);
+    assert.match(links.editUrl, /^http:\/\/127\.0\.0\.1:\d+\/configure#edit=pe1\./);
     assert.doesNotMatch(links.manifestUrl, /torbox-secret-value|newznab-secret-value|NZBGeek/);
 
     const manifest = await (await fetch(links.manifestUrl)).json();
@@ -65,12 +67,46 @@ const { createApp } = require('../addon');
       'ufc-upcoming', 'ufc-recent',
     ]);
 
-    const edit = await fetch(base + links.configureUrl);
-    const editHtml = await edit.text();
+    // The installed manifest token is use-only and cannot reveal credentials.
+    const manifestConfigure = await fetch(links.manifestUrl.replace('/manifest.json', '/configure'), {
+      redirect: 'manual',
+    });
+    assert.strictEqual(manifestConfigure.status, 302);
+    assert.strictEqual(manifestConfigure.headers.get('location'), '/configure');
+
+    // The separate edit token travels in a URL fragment and is submitted in
+    // an Authorization header only when the browser loads the editor.
+    const editToken = decodeURIComponent(new URL(links.editUrl).hash.slice('#edit='.length));
+    const edit = await fetch(base + '/configure/edit', {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + editToken },
+    });
+    const editPayload = await edit.json();
     assert.strictEqual(edit.status, 200);
-    assert.match(editHtml, /Editing existing configuration/);
-    assert.match(editHtml, /NZBGeek/);
-    assert.match(editHtml, /api\.nzbgeek\.info/);
+    assert.strictEqual(editPayload.config.torboxApiKey, 'torbox-secret-value');
+    assert.strictEqual(editPayload.config.newznabIndexers[0].apiKey, 'newznab-secret-value');
+
+    const updated = await fetch(base + '/configure/token', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: 'Bearer ' + editToken,
+      },
+      body: JSON.stringify({
+        torboxApiKey: 'updated-torbox-secret',
+        newznabIndexers: [{
+          name: 'NZBGeek', url: 'https://api.nzbgeek.info/api', apiKey: 'updated-indexer-secret',
+        }],
+        catalogs: ['ufc-upcoming', 'ufc-recent'],
+      }),
+    });
+    const updatedLinks = await updated.json();
+    assert.strictEqual(updated.status, 200);
+    assert.strictEqual(updatedLinks.manifestUrl, links.manifestUrl);
+    const updatedEdit = await fetch(base + '/configure/edit', {
+      method: 'POST', headers: { authorization: 'Bearer ' + editToken },
+    });
+    assert.strictEqual((await updatedEdit.json()).config.torboxApiKey, 'updated-torbox-secret');
 
     const collection = await fetch(links.collectionUrl);
     assert.strictEqual(collection.status, 200);
@@ -78,7 +114,8 @@ const { createApp } = require('../addon');
     const collectionJson = await collection.json();
     assert.strictEqual(collectionJson[0].title, 'NZB-Sport-Pro');
 
-    const tamperedUrl = links.manifestUrl.replace(/.$/, (last) => last === 'A' ? 'B' : 'A');
+    const tamperedUrl = links.manifestUrl.replace(/(\/c\/pc1\.[^.]+\.)([^/])/, (all, prefix, first) =>
+      prefix + (first === 'A' ? 'B' : 'A'));
     assert.strictEqual((await fetch(tamperedUrl)).status, 404);
 
     const invalid = await fetch(base + '/configure/token', {
@@ -88,7 +125,7 @@ const { createApp } = require('../addon');
     });
     assert.strictEqual(invalid.status, 400);
 
-    console.log('stateless configure, manifest, collection, and tamper tests passed');
+    console.log('stored configure, split edit token, manifest, collection, and tamper tests passed');
   } finally {
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(tempRoot, { recursive: true, force: true });

@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const crypto = require('crypto');
 const config = require('./config');
 const { buildManifest } = require('./lib/manifest');
 const { handleCatalog } = require('./lib/catalog');
@@ -32,6 +33,8 @@ const torboxVoyager = require('./lib/sources/torbox-voyager');
 const nativeNewznab = require('./lib/sources/native-newznab');
 const publicPage = require('./lib/public-page');
 const publicConfig = require('./lib/public-config');
+const publicConfigStore = require('./lib/public-config-store');
+const requestGuard = require('./lib/request-guard');
 const APP_VERSION = require('./package.json').version || '?';
 
 
@@ -40,6 +43,9 @@ const APP_VERSION = require('./package.json').version || '?';
 // generate in HTML reflect the user's actual entry URL, not the internal
 // container address. Falls back to req.protocol/host, then to PUBLIC_URL env.
 function publicOriginFromReq(req) {
+  // A configured canonical URL is authoritative. This avoids Host and
+  // X-Forwarded-Host poisoning on public deployments.
+  if (config.publicUrl) return config.publicUrl.replace(/\/+$/, '');
   if (req) {
     const xfp = (req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
     const xfh = (req.headers['x-forwarded-host'] || '').split(',')[0].trim();
@@ -47,7 +53,6 @@ function publicOriginFromReq(req) {
     const host = xfh || req.headers.host || '';
     if (host) return proto + '://' + host;
   }
-  if (config.publicUrl) return config.publicUrl.replace(/\/+$/, '');
   return '';
 }
 
@@ -79,14 +84,52 @@ const LOGIN_LOCKOUT_MS = parseInt(process.env.LOGIN_LOCKOUT_MS || (15 * 60 * 100
 const loginFails = new Map(); // ip -> { fails, firstFailAt, lockUntil }
 
 function clientIp(req) {
-  // Cloudflare Tunnel forwards the real IP in CF-Connecting-IP. Fall through
-  // to the standard proxy chain header, then the socket address.
-  const cf = req.headers['cf-connecting-ip'];
-  if (cf) return String(cf).trim();
-  const xff = req.headers['x-forwarded-for'];
-  if (xff) return String(xff).split(',')[0].trim();
+  // Forwarded client-IP headers are attacker-controlled unless the origin is
+  // reachable only through the selected proxy. Defaults to the socket address.
+  const trust = String(process.env.TRUST_PROXY_HEADERS || 'none').toLowerCase();
+  if (trust === 'cloudflare' || trust === 'all') {
+    const cf = req.headers['cf-connecting-ip'];
+    if (cf) return String(cf).trim();
+  }
+  if (trust === 'all') {
+    const xff = req.headers['x-forwarded-for'];
+    if (xff) return String(xff).split(',')[0].trim();
+  }
   return (req.socket && req.socket.remoteAddress) || 'unknown';
 }
+
+function timingSafeTextEqual(left, right) {
+  const a = Buffer.from(String(left || ''), 'utf8');
+  const b = Buffer.from(String(right || ''), 'utf8');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+const configureWriteLimit = requestGuard.fixedWindow({
+  name: 'configure-write', windowMs: process.env.CONFIGURE_RATE_LIMIT_WINDOW_MS || 60000,
+  max: process.env.CONFIGURE_RATE_LIMIT_MAX || 5, key: clientIp,
+});
+const configureReadLimit = requestGuard.fixedWindow({
+  name: 'configure-read', windowMs: process.env.CONFIGURE_EDIT_RATE_LIMIT_WINDOW_MS || 60000,
+  max: process.env.CONFIGURE_EDIT_RATE_LIMIT_MAX || 10, key: clientIp,
+});
+const streamIpLimit = requestGuard.fixedWindow({
+  name: 'stream', windowMs: process.env.STREAM_RATE_LIMIT_WINDOW_MS || 15000,
+  max: process.env.STREAM_RATE_LIMIT_MAX || 10, key: clientIp,
+});
+const resolveIpLimit = requestGuard.fixedWindow({
+  name: 'resolve', windowMs: process.env.RESOLVE_RATE_LIMIT_WINDOW_MS || 60000,
+  max: process.env.RESOLVE_RATE_LIMIT_MAX || 30, key: clientIp,
+});
+const streamConcurrency = requestGuard.concurrency({
+  name: 'stream', globalMax: process.env.STREAM_GLOBAL_CONCURRENCY || 20,
+  perKeyMax: process.env.STREAM_CONFIG_CONCURRENCY || 2,
+  key: (req) => req.userAccount && req.userAccount.id,
+});
+const resolveConcurrency = requestGuard.concurrency({
+  name: 'resolve', globalMax: process.env.RESOLVE_GLOBAL_CONCURRENCY || 20,
+  perKeyMax: process.env.RESOLVE_CONFIG_CONCURRENCY || 2,
+  key: (req) => req.userAccount && req.userAccount.id,
+});
 
 function loginLockedOut(ip) {
   const e = loginFails.get(ip);
@@ -122,7 +165,22 @@ function clearLoginFails(ip) { loginFails.delete(ip); }
 
 function createApp() {
   const app = express();
+  let setupInProgress = false;
   app.disable('x-powered-by');
+
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+    res.setHeader('Content-Security-Policy', "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'self'; connect-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net");
+    const canonicalHttps = /^https:\/\//i.test(String(config.publicUrl || ''));
+    const forwardedHttps = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
+    if (canonicalHttps || req.secure || (forwardedHttps && !config.publicUrl)) {
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
+    next();
+  });
 
   // Content Studio imports are still plain text forms, but calendar files can
   // reasonably exceed the old settings-only 16 KB ceiling.
@@ -143,6 +201,19 @@ function createApp() {
   }
   app.use(loadSession);
 
+  // Reject authenticated cross-origin state changes. SameSite cookies already
+  // provide a baseline; validating Origin when browsers supply it also blocks
+  // malicious sibling subdomains without breaking non-browser admin scripts.
+  app.use((req, res, next) => {
+    if (req.method === 'POST' && req.user && req.headers.origin) {
+      let supplied = '';
+      try { supplied = new URL(String(req.headers.origin)).origin; } catch (_) {}
+      const expected = publicOriginFromReq(req);
+      if (!supplied || supplied !== expected) return res.status(403).send('Cross-origin form submission rejected.');
+    }
+    next();
+  });
+
   function requireLogin(req, res, next) {
     if (!req.user) return res.redirect('/login');
     next();
@@ -159,12 +230,19 @@ function createApp() {
     next();
   }
 
-  // CORS — needed for the Stremio install URL.
+  // CORS is needed only on addon/collection JSON consumed by media clients.
+  // Configuration and admin APIs remain same-origin.
   app.use((req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') return res.sendStatus(204);
+    const addonJson = /^\/(?:c|u)\//.test(req.path)
+      && /(?:\.json$|\/resolve\/|\/warm\/|\/nuvio-collections\.json$)/.test(req.path);
+    if (addonJson) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      if (req.method === 'OPTIONS') return res.sendStatus(204);
+    } else if (req.method === 'OPTIONS') {
+      return res.sendStatus(404);
+    }
     next();
   });
 
@@ -207,17 +285,11 @@ function createApp() {
     const events = store.getEvents();
     const meta = store.loadFromDisk() || {};
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    const companion = settings.getCompanion();
-    const prowlarr = settings.getProwlarr();
     res.send(JSON.stringify({
       ok: true,
+      version: APP_VERSION,
       events: events.length,
       updatedAt: meta.updatedAt || null,
-      companionConfigured: !!(companion && companion.url),
-      prowlarrConfigured: !!(prowlarr && prowlarr.url && prowlarr.apiKey),
-      accountsEnabled: true,
-      promotions: promotions.enabled.map((p) => p.id),
-      userCount: users.userCount(),
     }));
   });
 
@@ -225,6 +297,10 @@ function createApp() {
   //     the wildcard /:token mount). --------------------------------
   app.get('/setup', (req, res) => {
     if (users.userCount() > 0) return res.status(410).send('Setup already complete.');
+    if (/^https:\/\//i.test(String(config.publicUrl || '')) && !process.env.SETUP_TOKEN) {
+      return res.status(503).send(authPage('Initial setup disabled',
+        '<p>Set a distinct <code>SETUP_TOKEN</code> in the server environment and restart before creating the first administrator.</p>'));
+    }
     const prefill = (config.admin && config.admin.user) || '';
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(authPage('Initial setup',
@@ -238,15 +314,29 @@ function createApp() {
       + '<input class="form-control" name="username" value="' + escapeHtml(prefill) + '" required minlength="3" maxlength="32" autofocus>'
       + '<label class="form-label">Password</label>'
       + '<input class="form-control" name="password" type="password" required minlength="8">'
+      + (process.env.SETUP_TOKEN
+        ? '<label class="form-label">Setup token</label>'
+          + '<input class="form-control" name="setupToken" type="password" required autocomplete="off">'
+        : '')
       + '<button class="btn btn-primary w-100 mt-3" type="submit">Create admin account</button>'
       + '</form>'
     ));
   });
 
-  app.post('/setup', async (req, res) => {
+  app.post('/setup', configureWriteLimit, async (req, res) => {
     if (users.userCount() > 0) return res.status(410).send('Setup already complete.');
+    if (/^https:\/\//i.test(String(config.publicUrl || '')) && !process.env.SETUP_TOKEN) {
+      return res.status(503).send('Initial setup requires SETUP_TOKEN on a public deployment.');
+    }
+    if (setupInProgress) return res.status(409).send('Setup is already in progress.');
+    const requiredSetupToken = String(process.env.SETUP_TOKEN || '');
+    if (requiredSetupToken && !timingSafeTextEqual(req.body.setupToken, requiredSetupToken)) {
+      return res.status(403).send(authPage('Setup failed',
+        '<p>Invalid setup token.</p><p><a href="/setup">Try again</a></p>'));
+    }
     const username = String(req.body.username || '').trim();
     const password = String(req.body.password || '');
+    setupInProgress = true;
     try {
       const u = await users.createUser({ username, password, role: 'admin' });
       sessions.setCookie(res, u.id, req);
@@ -254,6 +344,8 @@ function createApp() {
     } catch (err) {
       res.status(400).send(authPage('Setup failed',
         '<p>' + escapeHtml(err.message) + '</p><p><a href="/setup">Try again</a></p>'));
+    } finally {
+      setupInProgress = false;
     }
   });
 
@@ -278,22 +370,27 @@ function createApp() {
     return res.send(publicPage.configurationPage({ promotions: promotions.enabled }));
   });
 
+  // A manifest token is deliberately use-only. Stremio's Configure button
+  // lands here, but it must never turn a leaked install URL into raw API-key
+  // disclosure. Editing uses a separate pe1 token held in a URL fragment.
   app.get('/c/:configToken/configure', (req, res) => {
-    try {
-      const decoded = publicConfig.decode(req.params.configToken);
-      res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      res.setHeader('Cache-Control', 'no-store');
-      return res.send(publicPage.configurationPage({
-        config: decoded,
-        promotions: promotions.enabled,
-        token: req.params.configToken,
-      }));
-    } catch (err) {
-      return res.status(400).send('Invalid or expired private configuration link.');
-    }
+    res.setHeader('Cache-Control', 'no-store');
+    return res.redirect(302, '/configure');
   });
 
-  app.post('/configure/token', (req, res) => {
+  app.post('/configure/edit', configureReadLimit, (req, res) => {
+    const auth = String(req.headers.authorization || '');
+    const token = /^Bearer\s+(.+)$/i.exec(auth);
+    const resolved = token ? publicConfigStore.resolveEdit(token[1]) : null;
+    if (!resolved) return res.status(404).json({ ok: false, error: 'Invalid private editing link.' });
+    return send(res, {
+      ok: true,
+      config: resolved.config,
+      accessToken: resolved.accessToken,
+    }, { cacheControl: 'no-store' });
+  });
+
+  app.post('/configure/token', configureWriteLimit, (req, res) => {
     try {
       const body = req.body || {};
       const allCatalogIds = promotions.enabled.flatMap((promotion) =>
@@ -303,16 +400,24 @@ function createApp() {
         ? Array.from(new Set(body.catalogs.map(String).filter((id) => allowedCatalogs.has(id))))
         : [];
       if (selected.length === 0) throw new Error('Select at least one catalog.');
-      const token = publicConfig.encode(Object.assign({}, body, {
+      const cleanConfig = Object.assign({}, body, {
         catalogs: selected.length === allCatalogIds.length ? [] : selected,
-      }));
+      });
+      const auth = String(req.headers.authorization || '');
+      const editMatch = /^Bearer\s+(.+)$/i.exec(auth);
+      const saved = editMatch
+        ? publicConfigStore.update(editMatch[1], cleanConfig)
+        : publicConfigStore.create(cleanConfig);
+      if (!saved) return res.status(404).json({ ok: false, error: 'Invalid private editing link.' });
+      const token = saved.accessToken;
       const origin = publicOriginFromReq(req).replace(/\/+$/, '');
       const basePath = '/c/' + encodeURIComponent(token);
       const manifestUrl = origin + basePath + '/manifest.json';
       return send(res, {
         manifestUrl,
         installUrl: manifestUrl.replace(/^https?:\/\//i, 'stremio://'),
-        configureUrl: basePath + '/configure',
+        configureUrl: '/configure#edit=' + encodeURIComponent(saved.editToken),
+        editUrl: origin + '/configure#edit=' + encodeURIComponent(saved.editToken),
         collectionUrl: origin + basePath + '/nuvio-collections.json',
       }, { cacheControl: 'no-store' });
     } catch (err) {
@@ -499,7 +604,7 @@ function createApp() {
       send(res, handleMeta({ type: req.params.type, id: decodeURIComponent(req.params.id) }));
     });
 
-    r.get('/stream/:type/:id.json', async (req, res) => {
+    r.get('/stream/:type/:id.json', streamIpLimit, streamConcurrency, async (req, res) => {
       try {
         const result = await handleStream({
           type: req.params.type,
@@ -529,7 +634,7 @@ function createApp() {
     // apiToken alone is no longer sufficient — it gets you through the router
     // middleware, but the resolve action requires a live signature too.
     const urlSign = require('./lib/url-sign');
-    r.get('/resolve/:provider/:eventId/:infoHash', async (req, res) => {
+    r.get('/resolve/:provider/:eventId/:infoHash', resolveIpLimit, resolveConcurrency, async (req, res) => {
       const { provider, eventId, infoHash } = req.params;
       const v = urlSign.verifyResolve({
         userId: req.params.userId,
@@ -662,7 +767,14 @@ function createApp() {
 
     r.use((req, res, next) => {
       try {
-        req.userAccount = publicConfig.configuredUser(req.params.configToken);
+        const stored = publicConfigStore.resolveAccess(req.params.configToken);
+        req.userAccount = stored ? {
+          id: publicConfig.identity(req.params.configToken),
+          username: publicConfig.identity(req.params.configToken),
+          role: 'user',
+          apiToken: '',
+          config: stored,
+        } : publicConfig.configuredUser(req.params.configToken);
         req.configBasePath = '/c/' + encodeURIComponent(req.params.configToken);
         next();
       } catch (_) {
@@ -691,7 +803,7 @@ function createApp() {
     r.get('/meta/:type/:id.json', (req, res) => {
       send(res, handleMeta({ type: req.params.type, id: decodeURIComponent(req.params.id) }));
     });
-    r.get('/stream/:type/:id.json', async (req, res) => {
+    r.get('/stream/:type/:id.json', streamIpLimit, streamConcurrency, async (req, res) => {
       try {
         const result = await handleStream({
           type: req.params.type,
@@ -711,7 +823,7 @@ function createApp() {
       }
     });
 
-    r.get('/resolve/:provider/:eventId/:infoHash', async (req, res) => {
+    r.get('/resolve/:provider/:eventId/:infoHash', resolveIpLimit, resolveConcurrency, async (req, res) => {
       const { provider, eventId, infoHash } = req.params;
       const verified = urlSign.verifyResolve({
         userId: req.userAccount.id,
@@ -1442,7 +1554,7 @@ function createApp() {
     ));
   });
 
-  app.post('/invite/:token', async (req, res) => {
+  app.post('/invite/:token', configureWriteLimit, async (req, res) => {
     const password = String(req.body.password || '');
     try {
       const u = await users.consumeInvite(req.params.token, password);

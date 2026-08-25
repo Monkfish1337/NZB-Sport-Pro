@@ -118,6 +118,7 @@ module.exports = {
 
   // Multi-user accounts (Phase 2)
   usersFile: process.env.USERS_FILE || './data/users.json',
+  publicConfigsFile: process.env.PUBLIC_CONFIGS_FILE || './data/public-configs.json',
   sessionSecret: process.env.SESSION_SECRET || '',
 
   // When zero candidates are cached on any debrid, automatically queue the

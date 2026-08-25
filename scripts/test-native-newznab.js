@@ -80,6 +80,21 @@ async function main() {
     assert.strictEqual(nativeNewznab._test.sameProviderHost('usenet-crawler.com', 'www.usenet-crawler.com'), true);
     assert.strictEqual(nativeNewznab._test.sameProviderHost('api.usenet-crawler.com', 'www.usenet-crawler.com'), false);
     assert.strictEqual(nativeNewznab._test.sameProviderHost('usenet-crawler.com', 'unrelated.example'), false);
+    assert.strictEqual(nativeNewznab._test.privateIp('127.0.0.1'), true);
+    assert.strictEqual(nativeNewznab._test.privateIp('169.254.169.254'), true);
+    assert.strictEqual(nativeNewznab._test.privateIp('198.18.0.1'), true);
+    assert.strictEqual(nativeNewznab._test.privateIp('203.0.113.8'), true);
+    assert.strictEqual(nativeNewznab._test.privateIp('::ffff:7f00:1'), true);
+    assert.strictEqual(nativeNewznab._test.privateIp('2606:4700:4700::1111'), false);
+    const pinned = nativeNewznab._test.pinnedAgent('https://indexer.example/api', [
+      { address: '93.184.216.34', family: 4 },
+    ]);
+    const pinnedLookup = await new Promise((resolve, reject) => {
+      pinned.options.lookup('indexer.example', {}, (error, address, family) =>
+        error ? reject(error) : resolve({ address, family }));
+    });
+    pinned.destroy();
+    assert.deepStrictEqual(pinnedLookup, { address: '93.184.216.34', family: 4 });
 
     const redirectRequests = [];
     const redirectLogs = [];

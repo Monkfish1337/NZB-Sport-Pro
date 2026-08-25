@@ -22,8 +22,9 @@ generated private manifest. There is no public signup or user dashboard.
   The same job is reused throughout, so no duplicate submission is created.
 - Generates and downloads or copies a Nuvio collection containing the selected
   Combat Sports, Wrestling, Football, and Motorsport catalogs.
-- Authenticated-encrypts TorBox and Newznab API keys inside the private manifest
-  configuration URL; no public user record is created.
+- Stores each public configuration as an authenticated-encrypted record and
+  issues two separate capabilities: a use-only manifest token and a private
+  editing token. The manifest cannot reveal the underlying API keys.
 - Keeps NZB URLs and bytes in bounded server memory and out of client responses.
 - Never downloads or proxies video data.
 
@@ -58,15 +59,42 @@ services:
     environment:
       SESSION_SECRET: "replace-with-at-least-32-random-characters"
       PUBLIC_URL: "https://nzb-sport-pro.example.com"
+      SETUP_TOKEN: "replace-with-a-separate-random-setup-secret"
+      TRUST_PROXY_HEADERS: "cloudflare"
       TSDB_API_KEY: "123"
     volumes:
       - nzb_sport_pro_data:/app/data
     ports:
-      - "7000:7000"
+      - "127.0.0.1:7000:7000"
 
 volumes:
   nzb_sport_pro_data:
 ~~~
+
+### Public-hosting privacy boundary
+
+- Each generated manifest contains a use-only identifier. It can search and
+  resolve with that saved configuration, but it cannot retrieve the user's
+  TorBox or Newznab credentials.
+- The separate editing secret is kept after `#edit=` in the browser URL. URL
+  fragments are not sent to this server, Cloudflare, or access logs; the page
+  submits it in an authorization header only when loading or saving settings.
+- TorBox and Newznab API keys are encrypted at rest in the persistent data
+  volume. Back up `SESSION_SECRET` separately; losing it makes saved public
+  configurations unreadable.
+- The operator can observe event/search titles, indexer display names, coarse
+  result counts, processing states, timestamps, and pseudonymous configuration
+  IDs in application logs. API keys, passwords, authorization headers, and
+  credential-bearing URLs are centrally redacted. Container/platform access
+  logs remain the operator's responsibility.
+- The service necessarily sends each user's API credentials to the provider
+  they configured (their Newznab indexer and TorBox). NZB bytes are bounded,
+  held briefly in memory, forwarded to that user's TorBox account after a
+  click, and are not written to disk by NZB-Sport-Pro.
+
+For a Cloudflare Tunnel deployment, keep the Compose port bound to
+`127.0.0.1`, set an exact HTTPS `PUBLIC_URL`, use a distinct `SETUP_TOKEN`, and
+do not create a public DNS record that exposes the origin by another route.
 
 Start it with:
 
@@ -74,13 +102,18 @@ Start it with:
 docker compose up -d
 ~~~
 
-Visit the root page to open the stateless configurator. Users enter their own
-services and receive a private manifest URL; credentials are not saved as an
-account. Keep that URL private because possession grants use of its services.
+Visit the root page to open the public configurator. Users enter their own
+services and receive a private manifest URL plus a separate private editing
+link. Configurations are encrypted in the persistent data volume; no public
+login account is created. Keep the manifest private because possession grants
+use of its services, and protect the editing link because it can display and
+change the saved credentials. Its `#edit=` fragment is not sent in HTTP request
+paths or normal reverse-proxy access logs.
 
 The operator dashboard is separate and optional. Visit `/setup` explicitly to
 create its first administrator, then use `/login`, `/account`, and `/admin` for
-the retained maintenance tools.
+the retained maintenance tools. When `PUBLIC_URL` is HTTPS, first-admin setup
+is disabled until a non-empty `SETUP_TOKEN` is configured.
 
 ## Metadata shared with SeriousSportSync
 
@@ -101,7 +134,7 @@ node scripts/sync-metadata.js /path/to/Serioussportsync .
 
 Product-specific code stays independent, including:
 
-- the public stateless configuration experience;
+- the public encrypted configuration experience;
 - user storage and credential handling;
 - native Newznab discovery;
 - TorBox Usenet cache/library checks and resolution;
@@ -113,9 +146,12 @@ The last imported source revision is recorded in
 ## Security model
 
 - A production `SESSION_SECRET` of at least 32 random characters is mandatory.
-- Changing `SESSION_SECRET` invalidates every previously generated manifest.
-- Public users have no account or database record; their authenticated-encrypted
-  configuration lives in the private manifest URL.
+- Changing `SESSION_SECRET` invalidates every previously generated manifest and
+  makes saved public configurations unreadable. Back it up securely.
+- Public users have no login account. Their authenticated-encrypted
+  configuration is stored in `data/public-configs.json` with mode `0600`.
+- Installed manifests contain a use-only token. Editing requires a separate
+  secret which is carried in a browser URL fragment rather than the request path.
 - Public configurations accept HTTPS indexer endpoints only and reject private
   or local targets by default.
 - Credential-bearing Newznab URLs are never emitted to Stremio or Nuvio.
