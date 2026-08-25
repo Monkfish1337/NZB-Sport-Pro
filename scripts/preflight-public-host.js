@@ -27,6 +27,14 @@ const value = (name) => Object.prototype.hasOwnProperty.call(process.env, name)
   ? String(process.env[name] || '') : String(fileEnv[name] || '');
 const errors = [];
 const warnings = [];
+if (fs.existsSync(envPath)) {
+  fs.readFileSync(envPath, 'utf8').split(/\r?\n/).forEach((raw, index) => {
+    const line = raw.trim();
+    if (line && !line.startsWith('#') && /^[A-Za-z_][A-Za-z0-9_]*\s*:/.test(line)) {
+      errors.push('.env line ' + (index + 1) + ' must use KEY=value syntax, not KEY: value.');
+    }
+  });
+}
 const requireLength = (name, minimum) => {
   if (value(name).length < minimum) errors.push(name + ' must contain at least ' + minimum + ' characters.');
 };

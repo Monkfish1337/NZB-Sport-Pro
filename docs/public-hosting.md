@@ -27,6 +27,12 @@ These are deliberately looser than the application limits. Start in log mode
 when available and observe real traffic before blocking. Do not use browser
 challenges on addon JSON or playback routes; media clients cannot solve them.
 
+Cloudflare Free currently permits one rate-limiting rule with a 10-second
+period and mitigation duration. Use that slot for `POST /login` or `POST` paths
+starting `/configure/`, counted by IP, at 10 requests per 10 seconds with a
+10-second block. The application's stricter per-route and concurrency limits
+continue to protect stream and resolve routes.
+
 Current Cloudflare procedure:
 <https://developers.cloudflare.com/waf/rate-limiting-rules/create-zone-dashboard/>.
 

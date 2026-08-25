@@ -45,7 +45,10 @@ else
 fi
 
 tar -tzf "${DATA_ARCHIVE}" >/dev/null
-sha256sum "${DATA_ARCHIVE}" > "${STAGE}/nzb-sport-pro-backup/SHA256SUMS"
+(
+  cd "$(dirname "${DATA_ARCHIVE}")"
+  sha256sum "$(basename "${DATA_ARCHIVE}")"
+) > "${STAGE}/nzb-sport-pro-backup/SHA256SUMS"
 cat > "${STAGE}/nzb-sport-pro-backup/RESTORE.md" <<RESTORE
 # NZB-Sport-Pro data restore
 

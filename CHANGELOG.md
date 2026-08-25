@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.13
+
+### Recovery drill reliability
+
+- Stored relative data-archive paths in backup checksums so extracted archives
+  verify independently of the host's temporary staging directory.
+- Rejected colon-formatted `.env` assignments that Compose may silently expose
+  under the wrong variable name and `docker run --env-file` rejects.
+- Documented the single-rule Cloudflare Free rate-limiting fallback.
+
 ## 0.4.12
 
 ### Dockge backup compatibility
