@@ -185,8 +185,12 @@ function createApp() {
   // unchanged and every round re-verifies exp/sig before touching TorBox.
   function continueUsenetWait(req, res, outcome) {
     if (!outcome || !outcome.queued) return false;
+    // Keep the default below native-player redirect ceilings. Six resolver
+    // requests (the initial request plus five continuations) leave room for
+    // the final TorBox/CDN hand-off while the longer per-request poll covers
+    // normal 1-3 minute Usenet processing jobs.
     const maxRounds = Math.max(0, Math.min(15,
-      parseInt(process.env.TORBOX_USENET_WAIT_REDIRECTS || '10', 10) || 0));
+      parseInt(process.env.TORBOX_USENET_WAIT_REDIRECTS || '5', 10) || 0));
     const round = Math.max(0, Math.min(maxRounds,
       parseInt(String(req.query.wait || '0'), 10) || 0));
     if (round >= maxRounds) return false;

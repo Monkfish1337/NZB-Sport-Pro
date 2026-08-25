@@ -239,6 +239,26 @@ async function main() {
   assert.strictEqual(failed.detail, 'NZB is missing required articles');
   assert.match(failureLogs[0] || '', /job 202 failed for "Broken Sports Release".*missing required articles/i);
 
+  let longPollChecks = 0;
+  async function longPollFetch(url) {
+    if (url.includes('/usenet/mylist')) {
+      longPollChecks += 1;
+      return response(200, { data: { id: 303, files: longPollChecks >= 25
+        ? [{ id: 30, name: 'slow-ready-match.mkv', size: 5000000000 }] : [] } });
+    }
+    if (url.includes('/usenet/requestdl')) {
+      return response(200, { data: 'https://cdn.torbox.app/slow-ready-match.mkv' });
+    }
+    throw new Error('unexpected long-poll URL ' + url);
+  }
+  const slowReady = await torboxUsenet.findPlayable(303, 'torbox-key-slow', () => {}, {
+    fetchImpl: longPollFetch,
+    maxWaitMs: 1000,
+    pollIntervalMs: 1,
+  });
+  assert.strictEqual(slowReady.url, 'https://cdn.torbox.app/slow-ready-match.mkv');
+  assert.strictEqual(longPollChecks, 25, 'poll attempts scale beyond the former fixed 20-check ceiling');
+
   console.log('TorBox Usenet cached/queued/wait-resume/failure resolver tests passed');
 }
 

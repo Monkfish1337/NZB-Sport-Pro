@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.2
+
+### Long TorBox processing without exhausting player redirects
+
+- Rebalanced automatic playback from many short resolver redirects to an
+  initial request plus five continuations of up to 35 seconds each, covering
+  roughly three and a half minutes while retaining redirect headroom for the
+  final TorBox/CDN URL.
+- Made the TorBox status-poll attempt count follow the configured wait window;
+  longer waits now continue polling instead of silently stopping after about
+  twenty checks.
+
 ## 0.3.1
 
 ### Automatic playback after TorBox processing

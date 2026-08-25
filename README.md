@@ -32,9 +32,11 @@ Newznab results. Consequently, `Instant Play` means an owned/completed TorBox
 job. A positive shared-cache check is labelled as an attach-and-wait action,
 not promised as immediate playback.
 
-By default, a queue click can continue for ten resolver rounds of up to eight
-seconds each. If TorBox finishes within that window, playback starts without a
-second click. Operators can tune `TORBOX_USENET_PLAY_WAIT_MS` and
+By default, a queue click can continue through the initial resolver request and
+five continuations of up to 35 seconds each, covering roughly three and a half
+minutes. The smaller redirect count leaves native players enough headroom for
+the final TorBox/CDN hand-off. If TorBox finishes within that window, playback
+starts without a second click. Operators can tune `TORBOX_USENET_PLAY_WAIT_MS` and
 `TORBOX_USENET_WAIT_REDIRECTS`; the existing processing response remains the
 fallback for exceptionally slow jobs or clients with a restrictive redirect
 limit. NZB-Sport-Pro never proxies the video itself.
