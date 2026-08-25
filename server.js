@@ -1,5 +1,6 @@
 // Stremio UFC Metadata Addon — entry point
 const config = require('./config');
+const APP_VERSION = require('./package.json').version || '?';
 
 // 0.27.0: capture every console line into an in-memory ring buffer so the
 // admin /logs page can render recent activity without SSH. Wrap BEFORE other
@@ -36,6 +37,7 @@ const app = createApp();
 // Warm the cache on boot so the first request is fast.
 const initial = store.loadFromDisk();
 const initialCount = (initial.events || []).length;
+console.log(`[serioussportsync] version ${APP_VERSION}`);
 console.log(`[serioussportsync] loaded ${initialCount} events from cache (${config.dataFile})`);
 
 // Start HTTP first, then handle background work.

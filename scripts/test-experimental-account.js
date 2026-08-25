@@ -142,17 +142,20 @@ async function main() {
     const account = await fetch(base + '/account', { headers: { Cookie: cookie } });
     const html = await account.text();
     assert.strictEqual(account.status, 200);
-    for (const name of ['torboxEnabled', 'uuEnabled', 'easynewsEnabled', 'nativeNewznabEnabled']) {
+    for (const name of ['torboxEnabled', 'uuEnabled', 'easynewsEnabled', 'nativeNewznabEnabled',
+      'nativeNewznabDirectLinkEnabled']) {
       assert.ok(html.includes('name="' + name + '"'), 'account renders ' + name + ' switch');
     }
     assert.ok(html.includes('Native Newznab → TorBox Usenet'));
     assert.ok(html.includes('Experimental install:'));
+    assert.ok(html.includes('including your indexer API key'));
 
     const form = new URLSearchParams();
     form.set('torboxApiKey', 'torbox-secret');
     form.set('torboxEnabled', 'on');
     form.set('easynewsEnabled', 'on');
     form.set('nativeNewznabEnabled', 'on');
+    form.set('nativeNewznabDirectLinkEnabled', 'on');
     form.append('newznabName', 'Local Test');
     form.append('newznabUrl', indexerEndpoint);
     form.append('newznabApiKey', 'newznab-secret');
@@ -171,6 +174,7 @@ async function main() {
     assert.strictEqual(user.config.uuEnabled, false);
     assert.strictEqual(user.config.easynewsEnabled, true);
     assert.strictEqual(user.config.nativeNewznabEnabled, true);
+    assert.strictEqual(user.config.nativeNewznabDirectLinkEnabled, true);
     assert.strictEqual(user.config.newznabIndexers[0].apiKey, 'newznab-secret');
     const rawUsers = fs.readFileSync(process.env.USERS_FILE, 'utf8');
     assert.ok(!rawUsers.includes('torbox-secret'));

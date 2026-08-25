@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.46.0-experimental.5
+
+### Link-identified TorBox cache attachment experiment
+
+- Added a disabled-by-default per-user consent switch that permits a clicked
+  link-matched cache result to send its credential-bearing NZB download URL to
+  TorBox instead of uploading the NZB file.
+- Split shared-cache diagnostics into link and content match counts so live
+  tests show whether the direct attachment path is applicable.
+- Prevented Newznab links whose item identity lives in query parameters from
+  using TorBox's query-stripped alternative hash, which could falsely mark all
+  results from the same indexer endpoint as cached.
+- Kept owned-job reuse, content-matched uploads, and queue behavior unchanged;
+  no indexer URL or API key is returned to the playback client or written to
+  logs.
+- Added the running application version to container startup logs.
+
 ## 0.46.0-experimental.4
 
 ### Isolated native Newznab → TorBox Usenet development

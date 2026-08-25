@@ -354,6 +354,9 @@ function createApp() {
       if (config.experimentalNativeNewznab) {
         servicePatch.nativeNewznabEnabled = b.nativeNewznabEnabled === 'on'
           || b.nativeNewznabEnabled === '1' || b.nativeNewznabEnabled === 'true';
+        servicePatch.nativeNewznabDirectLinkEnabled = b.nativeNewznabDirectLinkEnabled === 'on'
+          || b.nativeNewznabDirectLinkEnabled === '1'
+          || b.nativeNewznabDirectLinkEnabled === 'true';
         servicePatch.newznabIndexers = newznabIndexersFromBody(b);
       }
       users.updateUserConfig(req.user.id, servicePatch);
@@ -2064,6 +2067,8 @@ function renderAccountPage(user, opts) {
     +   '<div class="card-body">'
     +     pipelineSwitch('nativeNewznabEnabled', cfg.nativeNewznabEnabled === true,
             'Enable native Newznab pipeline', 'Check TorBox shared cache and show separate instant-play and click-to-queue rows.')
+    +     pipelineSwitch('nativeNewznabDirectLinkEnabled', cfg.nativeNewznabDirectLinkEnabled === true,
+            'Allow direct TorBox indexer-link attachment', 'For a clicked shared-cache result matched by its link, send its credential-bearing NZB download URL (including your indexer API key) to TorBox. This may avoid TorBox file-upload attach delays. Disabled by default.')
     +     '<p class="text-secondary small">API keys are encrypted at rest. SSS fetches only the top relevant NZBs into bounded, expiring memory for a batched cache check; links and bytes never reach the client or disk. Cached rows attach in cached-only mode, while uncached content enters your TorBox account only after its Queue row is clicked. Public HTTPS indexers are required by default.</p>'
     +     '<div id="newznab-indexers">' + newznabRows + '</div>'
     +     '<button class="btn btn-outline-primary btn-sm" id="newznab-add" type="button">Add indexer</button>'

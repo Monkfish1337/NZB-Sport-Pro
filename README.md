@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.46.0--experimental.4-orange.svg" alt="Version 0.46.0 experimental 4">
+  <img src="https://img.shields.io/badge/version-0.46.0--experimental.5-orange.svg" alt="Version 0.46.0 experimental 5">
   <a href="https://github.com/Monkfish1337/Serioussportsync/actions/workflows/ci.yml"><img src="https://github.com/Monkfish1337/Serioussportsync/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/Monkfish1337/Serioussportsync/pkgs/container/serioussportsync"><img src="https://img.shields.io/badge/GHCR-container-2496ED?logo=docker&logoColor=white" alt="Container image"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT license"></a>
@@ -101,7 +101,7 @@ It pulls `ghcr.io/monkfish1337/serioussportsync:experimental-newznab` and uses
 container `serioussportsync-experimental`, host port `7001`, and a separate
 `serioussportsync_experimental_data` volume. The normal stable container,
 `.env`, port `7000`, `latest` image, and data volume are not touched. A pinned
-`0.46.0-experimental.4` tag is published from the same commit.
+`0.46.0-experimental.5` tag is published from the same commit.
 
 To update an existing test service such as `serioussportsync-test`, keep its
 current ports, environment file, and data volume, change only its Compose
@@ -117,14 +117,23 @@ Search and TorBox cache checks are read-only. Credential-bearing result links
 stay in a short-lived server memory store and are represented in clients by
 opaque, signed tokens. SSS fetches only the top relevant NZBs into a bounded,
 expiring memory cache, hashes them, and checks TorBox's shared Usenet cache in
-one batch. It uses TorBox's documented message-ID, NZB-file, and
-exact/normalized link strategies so equivalent indexer NZBs can match the same
-cached download. By default every displayed native result is included in that
-classification. `Instant Play` rows are attached to the user's account in
+one batch. It uses TorBox's documented message-ID, NZB-file, and exact-link
+strategies so equivalent indexer NZBs can match the same cached download.
+Query-stripped link hashes are used only when the query contains no item
+identity; Newznab `t=get&id=...` links are deliberately excluded because
+stripping their query would collapse unrelated results to one false cache hit.
+By default every displayed native result is included in that classification.
+`Instant Play` rows are attached to the user's account in
 cached-only mode when clicked; `Queue` rows begin processing only when clicked.
 Completed matching jobs already present in the user's TorBox account are reused
 directly, covering delays or misses in TorBox's shared-cache index.
-Cache logs report shared and already-owned hits separately.
+Cache logs report link-based, content-based, and already-owned hits separately.
+The optional direct-link attachment switch is disabled by default. When the
+user explicitly enables it, a clicked shared-cache result matched by its link
+is attached by sending the credential-bearing indexer download URL—including
+the user's indexer API key—to TorBox. The URL still never reaches the playback
+client or SSS logs. Content-matched and queue rows continue using in-memory NZB
+file upload.
 Once a queued job completes, re-open the event and the shared-cache check will
 surface it as instant play. SSS never writes NZBs to disk or proxies media.
 

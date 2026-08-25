@@ -27,6 +27,11 @@ async function main() {
   assert.ok(strategies.includes(rawHash), 'raw NZB fallback is included');
   assert.ok(strategies.includes(require('crypto').createHash('md5').update(nzbUrl).digest('hex')),
     'exact indexer-link strategy is included');
+  assert.strictEqual(torboxUsenet.nzbLinkHashes(nzbUrl).length, 1,
+    'query-stripped Newznab API links are excluded because id lives in the query');
+  assert.strictEqual(torboxUsenet.nzbLinkHashes(
+    'https://downloads.example/release/123?filename=match.nzb&apikey=secret').length, 2,
+  'normalized link remains available when query fields do not identify the item');
   assert.notStrictEqual(strategies[1],
     require('crypto').createHash('md5').update(secondMessageId).digest('hex'),
     'core NZB and link strategies precede extra message IDs');
@@ -144,6 +149,45 @@ async function main() {
   );
   assert.strictEqual(recovered.url, 'https://cdn.torbox.app/recovered-match.mkv');
   assert.strictEqual(recovered.id, 66);
+
+  const directNzb = Buffer.from('<nzb><file subject="direct"><segments><segment number="1">'
+    + 'direct-link-match@news.example</segment></segments></file></nzb>');
+  const directUrl = 'https://indexer.example/api?t=get&id=direct&apikey=private-indexer-key';
+  let directCreateBody = null;
+  const directLogs = [];
+  async function directFetch(url, options) {
+    if (url.endsWith('/usenet/createusenetdownload')) {
+      directCreateBody = options.body;
+      return response(200, { data: { usenetdownload_id: 55 } });
+    }
+    if (url.includes('/usenet/mylist?')) {
+      return response(200, { data: { id: 55, files: [
+        { id: 4, name: 'direct-match.mkv', size: 2000000000 },
+      ] } });
+    }
+    if (url.includes('/usenet/requestdl')) {
+      return response(200, { data: 'https://cdn.torbox.app/direct-match.mkv' });
+    }
+    throw new Error('unexpected direct URL ' + url);
+  }
+  const direct = await torboxUsenet.resolveNzb(
+    directNzb, 'Direct match', 'torbox-key-direct', (message) => directLogs.push(message), {
+      fetchImpl: directFetch,
+      knownCached: true,
+      nzbUrl: directUrl,
+      useDirectLink: true,
+      pollIntervalMs: 0,
+    }
+  );
+  assert.strictEqual(direct.url, 'https://cdn.torbox.app/direct-match.mkv');
+  assert.ok(Buffer.isBuffer(directCreateBody));
+  assert.ok(directCreateBody.includes(Buffer.from('name="link"\r\n\r\n' + directUrl)));
+  assert.ok(directCreateBody.includes(Buffer.from('name="add_only_if_cached"\r\n\r\ntrue')));
+  assert.ok(!directCreateBody.includes(Buffer.from('name="file"')),
+    'direct-link mode sends no file upload part');
+  assert.ok(directLogs.some((line) => line.includes('by direct indexer link')));
+  assert.ok(!directLogs.join('\n').includes('private-indexer-key'),
+    'credential-bearing URL is not logged');
   console.log('TorBox Usenet cached/queued resolver tests passed');
 }
 
