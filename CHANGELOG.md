@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.1
+
+### Automatic playback after TorBox processing
+
+- Kept an uncached result's original playback request alive through a bounded
+  chain of signed resolver redirects while TorBox processes the Usenet job.
+- Redirected directly to the TorBox media URL as soon as a playable file is
+  available, removing the normal need to back out and click the row again.
+- Reused the same pending TorBox job throughout and retained the existing
+  processing response as the timeout fallback; video data is never proxied.
+- Detected terminal TorBox Usenet states such as failed, expired, missing, and
+  aborted; these now stop the wait chain, emit the job ID, release title,
+  state, and available TorBox reason as an error log, and tell the user to
+  choose another result.
+
 ## 0.3.0
 
 ### Collections and honest wait-to-play states

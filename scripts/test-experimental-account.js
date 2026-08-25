@@ -15,6 +15,7 @@ process.env.DATA_FILE = path.join(tempRoot, 'events.json');
 process.env.CONTENT_STUDIO_FILE = path.join(tempRoot, 'content-studio.json');
 process.env.REFRESH_ON_EMPTY_CACHE = 'false';
 process.env.TORBOX_USENET_PLAY_WAIT_MS = '0';
+process.env.TORBOX_USENET_WAIT_REDIRECTS = '2';
 
 const fetch = require('node-fetch');
 
@@ -23,6 +24,7 @@ async function main() {
   let nzbFetchCount = 0;
   let cachedOnlyCreateCount = 0;
   let cacheCheckSawCached = false;
+  let queuedReady = false;
   const cachedMessageId = 'cached-main-card@news.example';
   const cachedNzb = Buffer.from('<?xml version="1.0"?><nzb><file poster="source" subject="cached-match">'
     + '<segments><segment bytes="123" number="1">' + cachedMessageId
@@ -90,7 +92,8 @@ async function main() {
       const id = Number(rawId);
       return res.end(JSON.stringify({ data: id === 77 ? { id: 77, files: [
         { id: 2, name: 'match.1080p.mkv', size: 4000000000 },
-      ] } : { id: 88, files: [] } }));
+      ] } : { id: 88, files: queuedReady
+        ? [{ id: 8, name: 'queued-match.1080p.mkv', size: 2000000000 }] : [] } }));
     }
     if (requestUrl.pathname === '/v1/api/usenet/requestdl') {
       assert.strictEqual(requestUrl.searchParams.get('token'), 'torbox-secret');
@@ -201,18 +204,24 @@ async function main() {
     assert.strictEqual(played.status, 302);
     assert.strictEqual(played.headers.get('location'), mockOrigin + '/video.mp4');
     const queued = await fetch(nativeRows[1].url, { redirect: 'manual' });
-    assert.strictEqual(queued.status, 425);
-    assert.ok(Number(queued.headers.get('retry-after')) >= 5);
+    assert.strictEqual(queued.status, 302);
+    assert.strictEqual(queued.headers.get('x-nzb-sport-pro-state'), 'processing');
+    assert.match(queued.headers.get('location') || '', /[?&]wait=1/);
     const processingResponse = await fetch(base + '/u/' + user.id + '/' + user.apiToken
       + '/stream/movie/' + encodeURIComponent(event.id) + '.json');
     const processingPayload = await processingResponse.json();
     assert.ok(processingPayload.streams.some((row) => /TorBox Usenet - Processing/.test(row.name || '')),
       'reopened event identifies the existing processing job');
+    queuedReady = true;
+    const continuationUrl = new URL(queued.headers.get('location'), base).toString();
+    const continued = await fetch(continuationUrl, { redirect: 'manual' });
+    assert.strictEqual(continued.status, 302);
+    assert.strictEqual(continued.headers.get('location'), mockOrigin + '/video.mp4');
     assert.strictEqual(torboxUploadCount, 1, 'owned ready job is reused without another upload');
     assert.strictEqual(cachedOnlyCreateCount, 0);
     assert.strictEqual(cacheCheckSawCached, true, 'message-ID hash was included in cache classification');
     assert.strictEqual(nzbFetchCount, 2, 'prepared NZBs are reused on click without a second indexer grab');
-    console.log('experimental account UI, instant/queue rows, bounded NZB reuse, and both play paths passed');
+    console.log('experimental account UI, automatic processing continuation, and both play paths passed');
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await new Promise((resolve) => mockServer.close(resolve));

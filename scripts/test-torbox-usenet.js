@@ -99,7 +99,7 @@ async function main() {
   );
   assert.strictEqual(queued.ok, true);
   assert.strictEqual(queued.queued, true);
-  assert.strictEqual(queued.processing, true);
+  assert.strictEqual(queued.processing, false);
   assert.strictEqual(queued.id, 88);
   uncachedReady = true;
   const resumed = await torboxUsenet.resolveNzb(
@@ -209,7 +209,37 @@ async function main() {
   assert.strictEqual(fallback.id, 101);
   assert.strictEqual(fallbackCreates, 2, 'failed cache attach falls back to one normal queue submission');
 
-  console.log('TorBox Usenet cached/queued/wait-resume resolver tests passed');
+  const failedNzb = Buffer.from('<nzb><file subject="broken"><segments><segment number="1">'
+    + 'broken-release@news.example</segment></segments></file></nzb>');
+  const failureLogs = [];
+  async function failedFetch(url) {
+    if (url.includes('/usenet/checkcached')) return response(200, { data: {} });
+    if (url.endsWith('/usenet/createusenetdownload')) {
+      return response(200, { data: { usenetdownload_id: 202 } });
+    }
+    if (url.includes('/usenet/mylist')) return response(200, { data: {
+      id: 202,
+      download_state: 'failed',
+      error_reason: 'NZB is missing required articles',
+      files: [],
+    } });
+    throw new Error('unexpected failed-job URL ' + url);
+  }
+  const failed = await torboxUsenet.resolveNzb(
+    failedNzb, 'Broken Sports Release', 'torbox-key-failed', () => {}, {
+      fetchImpl: failedFetch,
+      pollIntervalMs: 0,
+      waitMs: 0,
+      errorLog: (message) => failureLogs.push(message),
+    }
+  );
+  assert.strictEqual(failed.ok, false);
+  assert.strictEqual(failed.error, 'torbox-job-failed');
+  assert.strictEqual(failed.state, 'failed');
+  assert.strictEqual(failed.detail, 'NZB is missing required articles');
+  assert.match(failureLogs[0] || '', /job 202 failed for "Broken Sports Release".*missing required articles/i);
+
+  console.log('TorBox Usenet cached/queued/wait-resume/failure resolver tests passed');
 }
 
 main().catch((err) => {

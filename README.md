@@ -17,8 +17,9 @@ generated private manifest. There is no public signup or user dashboard.
   browsing an event.
 - Treats only completed downloads in the user's own TorBox library as instant.
   Shared-cache matches attach on click, while uncached results queue explicitly.
-- Reuses an already-processing TorBox job and waits briefly for it to become
-  playable, avoiding duplicate submissions on repeated clicks.
+- Keeps the original playback request alive through bounded signed redirects
+  while TorBox processes, then redirects straight to the playable media URL.
+  The same job is reused throughout, so no duplicate submission is created.
 - Generates and downloads or copies a Nuvio collection containing the selected
   Combat Sports, Wrestling, Football, and Motorsport catalogs.
 - Authenticated-encrypts TorBox and Newznab API keys inside the private manifest
@@ -30,6 +31,19 @@ TorBox does not reliably expose its global Usenet cache for arbitrary personal
 Newznab results. Consequently, `Instant Play` means an owned/completed TorBox
 job. A positive shared-cache check is labelled as an attach-and-wait action,
 not promised as immediate playback.
+
+By default, a queue click can continue for ten resolver rounds of up to eight
+seconds each. If TorBox finishes within that window, playback starts without a
+second click. Operators can tune `TORBOX_USENET_PLAY_WAIT_MS` and
+`TORBOX_USENET_WAIT_REDIRECTS`; the existing processing response remains the
+fallback for exceptionally slow jobs or clients with a restrictive redirect
+limit. NZB-Sport-Pro never proxies the video itself.
+
+If TorBox reports a terminal Usenet state (for example a malformed NZB,
+missing articles, failed processing, or an expired download), the wait stops
+immediately. Container logs identify the TorBox job, release, state, and any
+reason returned by TorBox, while the player receives a terminal error instead
+of an endless processing loop.
 
 ## Docker Compose
 

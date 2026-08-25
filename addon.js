@@ -178,6 +178,26 @@ function createApp() {
     res.send(JSON.stringify(payload));
   }
 
+  // Keep a clicked playback request alive across short, bounded polling
+  // rounds. Media clients already follow the final TorBox 302; varying the
+  // `wait` query lets them follow several processing rounds without hitting
+  // same-URL redirect-loop protection. The signed resource itself is
+  // unchanged and every round re-verifies exp/sig before touching TorBox.
+  function continueUsenetWait(req, res, outcome) {
+    if (!outcome || !outcome.queued) return false;
+    const maxRounds = Math.max(0, Math.min(15,
+      parseInt(process.env.TORBOX_USENET_WAIT_REDIRECTS || '10', 10) || 0));
+    const round = Math.max(0, Math.min(maxRounds,
+      parseInt(String(req.query.wait || '0'), 10) || 0));
+    if (round >= maxRounds) return false;
+    const next = new URL(req.originalUrl, 'http://nzb-sport-pro.invalid');
+    next.searchParams.set('wait', String(round + 1));
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-NZB-Sport-Pro-State', 'processing');
+    res.redirect(302, next.pathname + next.search);
+    return true;
+  }
+
   // --- Public: health -------------------------------------------------
   app.get('/health', (req, res) => {
     const events = store.getEvents();
@@ -533,6 +553,7 @@ function createApp() {
           return res.redirect(302, out.url);
         }
         if (out && out.queued) {
+          if (continueUsenetWait(req, res, out)) return;
           res.setHeader('Retry-After', String(out.retryAfter || 10));
           return res.status(425)
             .set('Cache-Control', 'no-store')
@@ -542,6 +563,12 @@ function createApp() {
           return res.status(410)
             .set('Cache-Control', 'no-store')
             .send('This experimental stream link expired. Close and re-open the event to search again.');
+        }
+        if (out && out.error === 'torbox-job-failed') {
+          const reason = String(out.detail || out.state || 'TorBox could not process this NZB')
+            .replace(/[\r\n\t]+/g, ' ').slice(0, 300);
+          return res.status(422).set('Cache-Control', 'no-store')
+            .send('TorBox could not process this NZB: ' + reason + '. Choose another result.');
         }
         // Not cached / unresolvable on this provider — tell the player plainly.
         res.status(404).send('Not cached on ' + provider + ' (or no longer available).');
@@ -708,6 +735,7 @@ function createApp() {
           return res.redirect(302, out.url);
         }
         if (out && out.queued) {
+          if (continueUsenetWait(req, res, out)) return;
           res.setHeader('Retry-After', String(out.retryAfter || 10));
           return res.status(425).set('Cache-Control', 'no-store')
             .send('TorBox is still processing this Usenet download. The job is saved; click the same result again to wait without adding a duplicate.');
@@ -715,6 +743,12 @@ function createApp() {
         if (out && out.error === 'candidate-expired') {
           return res.status(410).set('Cache-Control', 'no-store')
             .send('This stream link expired. Close and re-open the event to search again.');
+        }
+        if (out && out.error === 'torbox-job-failed') {
+          const reason = String(out.detail || out.state || 'TorBox could not process this NZB')
+            .replace(/[\r\n\t]+/g, ' ').slice(0, 300);
+          return res.status(422).set('Cache-Control', 'no-store')
+            .send('TorBox could not process this NZB: ' + reason + '. Choose another result.');
         }
         return res.status(404).send('Not cached on ' + provider + ' (or no longer available).');
       } catch (err) {
