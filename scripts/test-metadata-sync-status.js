@@ -25,6 +25,9 @@ try {
   };
   fs.writeFileSync(path.join(tempRoot, 'metadata-sync.json'), JSON.stringify(manifest));
   const digest = computeDigest(tempRoot, manifest.paths);
+  fs.writeFileSync(path.join(tempRoot, 'lib', 'a.js'), 'module.exports = 1;\r\n');
+  assert.strictEqual(computeDigest(tempRoot, manifest.paths), digest,
+    'text digests must be stable across Git checkout line endings');
   fs.writeFileSync(path.join(tempRoot, '.metadata-source.json'), JSON.stringify({
     sourceRepository: manifest.sourceRepository,
     sourceBranch: manifest.sourceBranch,
