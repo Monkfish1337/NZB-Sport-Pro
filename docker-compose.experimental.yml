@@ -4,8 +4,7 @@
 services:
   serioussportsync-experimental:
     container_name: serioussportsync-experimental
-    build: .
-    image: serioussportsync:0.46.0-experimental.1
+    image: ghcr.io/monkfish1337/serioussportsync:experimental-newznab
     restart: unless-stopped
     env_file:
       - .env.experimental

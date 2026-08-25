@@ -93,13 +93,25 @@ For side-by-side testing from this branch, use the dedicated Compose file:
 ~~~bash
 cp .env.example .env.experimental
 # edit .env.experimental with a separate SESSION_SECRET and account settings
-docker compose -f docker-compose.experimental.yml up -d --build
+docker compose -f docker-compose.experimental.yml pull
+docker compose -f docker-compose.experimental.yml up -d
 ~~~
 
-It builds the checked-out source as `serioussportsync:0.46.0-experimental.1`
-and uses container `serioussportsync-experimental`, host port `7001`, and a
-separate `serioussportsync_experimental_data` volume. The normal stable
-container, `.env`, port `7000`, image, and data volume are not touched.
+It pulls `ghcr.io/monkfish1337/serioussportsync:experimental-newznab` and uses
+container `serioussportsync-experimental`, host port `7001`, and a separate
+`serioussportsync_experimental_data` volume. The normal stable container,
+`.env`, port `7000`, `latest` image, and data volume are not touched. A pinned
+`0.46.0-experimental.1` tag is published from the same commit.
+
+To update an existing test service such as `serioussportsync-test`, keep its
+current ports, environment file, and data volume, change only its Compose
+`image:` value to `ghcr.io/monkfish1337/serioussportsync:experimental-newznab`,
+then run:
+
+~~~bash
+docker compose pull serioussportsync-test
+docker compose up -d --no-deps --force-recreate serioussportsync-test
+~~~
 
 Searches are read-only. Credential-bearing result links stay in a short-lived
 server memory store and are represented in clients by opaque, signed tokens.

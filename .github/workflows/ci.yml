@@ -13,7 +13,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/hosted-newznab-torbox]
   pull_request:
     branches: [main]
 
@@ -75,6 +75,8 @@ jobs:
               './lib/sources/zilean',
               './lib/sources/realdebrid',
               './lib/sources/torbox',
+              './lib/sources/torbox-usenet',
+              './lib/sources/native-newznab',
               './lib/sources/premiumize',
             ];
             for (const m of mods) {
@@ -99,6 +101,11 @@ jobs:
 
       - name: Nuvio collections generator tests
         run: npm run test:nuvio
+
+      - name: Experimental Newznab and pipeline separation tests
+        run: |
+          npm run test:native-newznab
+          npm run test:experimental-separation
 
   docker:
     name: Docker Compose smoke test

@@ -2,7 +2,7 @@ name: Publish container
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/hosted-newznab-torbox]
     tags: ['v*']
   workflow_dispatch:
 
@@ -36,6 +36,8 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=experimental-newznab,enable=${{ github.ref == 'refs/heads/feature/hosted-newznab-torbox' }}
+            type=raw,value=0.46.0-experimental.1,enable=${{ github.ref == 'refs/heads/feature/hosted-newznab-torbox' }}
             type=ref,event=tag
             type=sha
           labels: |
@@ -70,3 +72,22 @@ jobs:
       - name: Stop test stack
         if: always() && github.ref == 'refs/heads/main'
         run: docker compose down --volumes --remove-orphans
+
+      - name: Verify experimental image through isolated Compose
+        if: github.ref == 'refs/heads/feature/hosted-newznab-torbox'
+        run: |
+          cp .env.example .env.experimental
+          sed -i 's/^SESSION_SECRET=.*/SESSION_SECRET=ci-only-do-not-use-in-prod-0000000000000000000000000000000000/' .env.experimental
+          sed -i 's/^ADMIN_USER=.*/ADMIN_USER=ci-admin/' .env.experimental
+          docker logout ghcr.io
+          docker compose -f docker-compose.experimental.yml pull
+          docker compose -f docker-compose.experimental.yml up -d --wait --wait-timeout 120
+          curl --fail --show-error --retry 5 --retry-delay 2 http://127.0.0.1:7001/health
+
+      - name: Show experimental container logs on failure
+        if: failure() && github.ref == 'refs/heads/feature/hosted-newznab-torbox'
+        run: docker compose -f docker-compose.experimental.yml logs --no-color
+
+      - name: Stop experimental test stack
+        if: always() && github.ref == 'refs/heads/feature/hosted-newznab-torbox'
+        run: docker compose -f docker-compose.experimental.yml down --volumes --remove-orphans
