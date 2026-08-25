@@ -44,7 +44,7 @@ const { runRefresh } = require('./scripts/refresh');
     console.error('[nzb-sport-pro] FATAL: ADMIN_PASSWORD must contain at least 12 characters.');
     process.exit(1);
   }
-  console.log('[nzb-sport-pro] environment administrator enabled for "' + username + '"; stored administrators cannot access maintenance.');
+  console.log('[nzb-sport-pro] environment administrator enabled for "' + username + '"; legacy stored accounts cannot sign in.');
 })();
 
 const app = createApp();

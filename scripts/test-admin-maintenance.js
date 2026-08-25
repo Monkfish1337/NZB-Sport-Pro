@@ -15,11 +15,24 @@ process.env.ADMIN_PASSWORD = 'environment-admin-password';
 
 const { createApp } = require('../addon');
 const users = require('../lib/users');
+const publicConfigStore = require('../lib/public-config-store');
 
 (async () => {
   await users.createUser({
     username: 'old-test-admin', password: 'old-test-admin-password', role: 'admin',
   });
+  await users.createUser({
+    username: 'old-test-user', password: 'old-test-user-password', role: 'user',
+  });
+  const savedConfig = publicConfigStore.create({
+    torboxApiKey: 'admin-test-torbox-secret',
+    newznabIndexers: [{
+      name: 'Admin Test Indexer', url: 'https://indexer.example/api', apiKey: 'indexer-secret',
+    }],
+    catalogs: ['ufc_upcoming'], maxStreams: 7, maxResultSizeGb: 8,
+    excludePreShows: true,
+  });
+  const configId = publicConfigStore.listSummaries()[0].id;
   const server = createApp().listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
   const base = 'http://127.0.0.1:' + server.address().port;
@@ -38,6 +51,13 @@ const users = require('../lib/users');
       }),
     });
     assert.strictEqual(storedAdmin.status, 401);
+    const storedUser = await fetch(base + '/login', {
+      method: 'POST', redirect: 'manual',
+      body: new URLSearchParams({
+        username: 'old-test-user', password: 'old-test-user-password',
+      }),
+    });
+    assert.strictEqual(storedUser.status, 401);
 
     const login = await fetch(base + '/login', {
       method: 'POST', redirect: 'manual',
@@ -55,24 +75,48 @@ const users = require('../lib/users');
     });
     assert.strictEqual(account.status, 302);
     assert.strictEqual(account.headers.get('location'), '/admin');
+    assert.strictEqual((await fetch(base + '/invite/legacy-token')).status, 404);
 
     const admin = await fetch(base + '/admin', { headers: { cookie } });
     const html = await admin.text();
     assert.strictEqual(admin.status, 200);
-    assert.match(html, /Maintenance/);
+    assert.match(html, /Administration/);
+    assert.match(html, /Configurations/);
     assert.match(html, /Metadata refresh/);
-    assert.match(html, /Stored users/);
+    assert.match(html, /User configurations \(1\)/);
+    assert.match(html, new RegExp(configId));
+    assert.match(html, /1<\/strong> <span class="text-secondary">indexer/);
+    assert.match(html, /1 selected/);
+    assert.match(html, /8 GB max/);
+    assert.match(html, /Pre-shows excluded/);
     assert.match(html, />Health</);
     assert.match(html, />Logs</);
-    assert.doesNotMatch(html, /Power Tool|Match Editor|Content Studio|Torrent discovery|Direct Prowlarr|General search/);
-    assert.doesNotMatch(html, /environment-admin-password/);
+    assert.doesNotMatch(html, /Power Tool|Match Editor|Content Studio|Torrent discovery|Direct Prowlarr|General search|Stored users|Invites \(/);
+    assert.doesNotMatch(html, /environment-admin-password|admin-test-torbox-secret|indexer-secret|indexer\.example/);
+
+    const manifestPath = '/c/' + encodeURIComponent(savedConfig.accessToken) + '/manifest.json';
+    assert.strictEqual((await fetch(base + manifestPath)).status, 200);
+    assert.strictEqual((await fetch(base + '/admin/configs/' + configId + '/disable', {
+      method: 'POST', redirect: 'manual', headers: { cookie },
+    })).status, 302);
+    assert.strictEqual((await fetch(base + manifestPath)).status, 404);
+    assert.strictEqual((await fetch(base + '/admin/configs/' + configId + '/enable', {
+      method: 'POST', redirect: 'manual', headers: { cookie },
+    })).status, 302);
+    assert.strictEqual((await fetch(base + manifestPath)).status, 200);
 
     for (const retired of [
       '/admin/power-tool', '/admin/search', '/admin/match-editor',
-      '/admin/promotions', '/admin/content',
+      '/admin/promotions', '/admin/content', '/admin/users/create',
+      '/admin/invites/create', '/admin/match-test',
     ]) {
       assert.strictEqual((await fetch(base + retired, { headers: { cookie } })).status, 404);
     }
+    assert.strictEqual((await fetch(base + '/admin/configs/' + configId + '/delete', {
+      method: 'POST', redirect: 'manual', headers: { cookie },
+    })).status, 302);
+    assert.strictEqual((await fetch(base + manifestPath)).status, 404);
+    assert.strictEqual(publicConfigStore.listSummaries().length, 0);
     console.log('environment admin auth and reduced maintenance surface tests passed');
   } finally {
     await new Promise((resolve) => server.close(resolve));

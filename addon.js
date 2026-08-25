@@ -537,10 +537,9 @@ function createApp() {
     const envMatch = envAdmin
       && username.toLowerCase() === envAdmin.username.toLowerCase();
     const storedUser = envMatch ? null : users.findByUsername(username);
-    // Environment credentials are authoritative for dashboard access. Keep
-    // ordinary stored users usable, but never let an old stored administrator
-    // bypass configured .env credentials.
-    const storedUserAllowed = storedUser && (!envAdmin || storedUser.role !== 'admin');
+    // Environment credentials are authoritative for this public app. Once
+    // configured, no legacy stored account may bypass the .env admin login.
+    const storedUserAllowed = storedUser && !envAdmin;
     const u = envMatch ? envAdmin : (storedUserAllowed ? storedUser : null);
     // Always run bcrypt — verifyDummy for unknown users — so response time
     // doesn't reveal whether the username exists.
@@ -995,6 +994,7 @@ function createApp() {
   const retiredAdminPaths = [
     '/admin/power-tool', '/admin/search', '/admin/match-editor',
     '/admin/promotions', '/admin/content', '/admin/sources',
+    '/admin/users', '/admin/invites', '/admin/match-test',
   ];
   for (const retiredPath of retiredAdminPaths) {
     app.use(retiredPath, requireAdmin, (req, res) => res.status(404).send(authPage(
@@ -1003,10 +1003,47 @@ function createApp() {
       + '<p><a href="/admin">Back to maintenance</a></p>'
     )));
   }
+  app.use('/invite', (req, res) => res.status(404).send(authPage(
+    'Invite unavailable',
+    '<p>Legacy account invitations are not used by NZB-Sport-Pro. Create a private install through <a href="/configure">the configurator</a>.</p>'
+  )));
 
   app.get('/admin', requireAdmin, (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(renderAdminPage(req.user, { flash: req.query.flash || null, origin: publicOriginFromReq(req) }));
+  });
+
+  app.post('/admin/configs/:id/disable', requireAdmin, (req, res) => {
+    try {
+      const ok = publicConfigStore.setDisabledById(req.params.id, true);
+      return res.redirect('/admin?flash=' + encodeURIComponent(
+        ok ? 'Configuration disabled. Its installed manifest no longer works.' : 'Configuration not found.'
+      ));
+    } catch (err) {
+      return res.redirect('/admin?flash=' + encodeURIComponent('Disable failed: ' + err.message));
+    }
+  });
+
+  app.post('/admin/configs/:id/enable', requireAdmin, (req, res) => {
+    try {
+      const ok = publicConfigStore.setDisabledById(req.params.id, false);
+      return res.redirect('/admin?flash=' + encodeURIComponent(
+        ok ? 'Configuration enabled.' : 'Configuration not found.'
+      ));
+    } catch (err) {
+      return res.redirect('/admin?flash=' + encodeURIComponent('Enable failed: ' + err.message));
+    }
+  });
+
+  app.post('/admin/configs/:id/delete', requireAdmin, (req, res) => {
+    try {
+      const ok = publicConfigStore.removeById(req.params.id);
+      return res.redirect('/admin?flash=' + encodeURIComponent(
+        ok ? 'Configuration permanently deleted.' : 'Configuration not found.'
+      ));
+    } catch (err) {
+      return res.redirect('/admin?flash=' + encodeURIComponent('Delete failed: ' + err.message));
+    }
   });
 
   app.post('/admin/users/create', requireAdmin, async (req, res) => {
@@ -1693,95 +1730,40 @@ function createApp() {
 
 function renderAdminPage(currentUser, opts) {
   opts = opts || {};
-  const all = users.listUsers();
-
+  const configs = publicConfigStore.listSummaries();
   const flashHtml = opts.flash
     ? '<div class="alert alert-info alert-dismissible" role="alert">'
       + '<div>' + escapeHtml(opts.flash) + '</div>'
       + '<a class="btn-close" data-bs-dismiss="alert"></a>'
       + '</div>'
     : '';
-
-  // Active invites — table + create form, all in a single card.
-  users.cleanExpiredInvites();
-  const invites = users.listInvites();
-  const inviteRows = invites.map(function (i) {
-    const url = '/invite/' + i.token;
-    const exp = (i.expiresAt || '').slice(0, 16).replace('T', ' ');
-    const roleBadgeClass = i.role === 'admin' ? 'bg-red-lt' : 'bg-blue-lt';
+  const rows = configs.map(function (item) {
+    const created = item.createdAt ? item.createdAt.slice(0, 16).replace('T', ' ') : 'Unknown';
+    const updated = item.updatedAt ? item.updatedAt.slice(0, 16).replace('T', ' ') : 'Unknown';
+    const status = !item.readable
+      ? '<span class="badge bg-red-lt">Unreadable</span>'
+      : item.disabledAt
+        ? '<span class="badge bg-yellow-lt">Disabled</span>'
+        : '<span class="badge bg-green-lt">Active</span>';
+    const catalogs = item.readable
+      ? (item.allCatalogs ? 'All defaults' : item.catalogCount + ' selected') : 'Unavailable';
+    const limits = item.readable
+      ? [item.maxResultSizeGb ? item.maxResultSizeGb + ' GB max' : 'No size limit',
+        item.maxStreams ? item.maxStreams + ' rows max' : 'Default row limit',
+        item.excludePreShows ? 'Pre-shows excluded' : 'Pre-shows included'].join(' · ')
+      : 'Encrypted configuration cannot be decrypted';
+    const toggleAction = item.disabledAt ? 'enable' : 'disable';
+    const toggleLabel = item.disabledAt ? 'Enable' : 'Disable';
     return ''
       + '<tr>'
-      +   '<td><code>' + escapeHtml(i.username) + '</code></td>'
-      +   '<td><span class="badge ' + roleBadgeClass + '">' + escapeHtml(i.role) + '</span></td>'
-      +   '<td class="text-secondary small">' + escapeHtml(exp) + '</td>'
-      +   '<td>'
-      +     '<div class="input-group input-group-sm">'
-      +       '<input class="form-control text-mono" value="' + escapeHtml(url) + '" readonly>'
-      +       '<button type="button" class="btn btn-outline-primary btn-copy" data-copy="' + escapeHtml(url) + '">Copy</button>'
-      +     '</div>'
-      +   '</td>'
-      +   '<td><form method="POST" action="/admin/invites/' + escapeHtml(i.token) + '/revoke" class="d-inline" onsubmit="return confirm(\'Revoke invite for ' + escapeHtml(i.username) + '?\');"><button type="submit" class="btn btn-sm btn-outline-danger">Revoke</button></form></td>'
-      + '</tr>';
-  }).join('');
-  const invitesHtml = ''
-    + '<div class="card mb-3">'
-    +   '<div class="card-header"><h3 class="card-title">Invites (' + invites.length + ')</h3></div>'
-    +   '<div class="card-body">'
-    +     '<p class="text-secondary small mb-3">Send the invite URL to the recipient. They set their own password on first visit. Invites expire after 7 days.</p>'
-    +     (invites.length > 0
-        ? '<div class="table-responsive mb-3"><table class="table table-vcenter card-table"><thead><tr><th>Username</th><th>Role</th><th>Expires</th><th>Invite URL</th><th class="w-1"></th></tr></thead><tbody>' + inviteRows + '</tbody></table></div>'
-        : '<p class="text-secondary fst-italic mb-3">No active invites.</p>')
-    +     '<form method="POST" action="/admin/invites/create" class="row g-2 align-items-end">'
-    +       '<div class="col-md-6">'
-    +         '<label class="form-label">New invite — username</label>'
-    +         '<input class="form-control" name="username" required minlength="3" maxlength="32" pattern="[A-Za-z0-9_.\\-]{3,32}" placeholder="3-32 chars, letters/digits/_-.">'
-    +       '</div>'
-    +       '<div class="col-md-3">'
-    +         '<label class="form-label">Role</label>'
-    +         '<select class="form-select" name="role"><option value="user" selected>user</option><option value="admin">admin</option></select>'
-    +       '</div>'
-    +       '<div class="col-md-3">'
-    +         '<button class="btn btn-primary w-100" type="submit">Create invite</button>'
-    +       '</div>'
-    +     '</form>'
-    +   '</div>'
-    + '</div>';
-
-  // Users table (Tabler-styled).
-  const rows = all.map(function (u) {
-    const isMe = (u.id === currentUser.id);
-    const created = (u.createdAt || '').slice(0, 10);
-    const seen = u.lastSeen ? u.lastSeen.slice(0, 10) : '—';
-    const roleBadgeClass = u.role === 'admin' ? 'bg-red-lt' : 'bg-blue-lt';
-    const deleteBtn = isMe
-      ? '<span class="text-secondary small">(you)</span>'
-      : '<form method="POST" action="/admin/users/' + escapeHtml(u.id) + '/delete" class="d-inline" onsubmit="return confirm(\'Delete user ' + escapeHtml(u.username) + '? This is permanent.\');"><button type="submit" class="btn btn-sm btn-outline-danger">Delete</button></form>';
-    const regenBtn = '<form method="POST" action="/admin/users/' + escapeHtml(u.id) + '/regenerate-token" class="d-inline" onsubmit="return confirm(\'Regenerate API token for ' + escapeHtml(u.username) + '? Their old install URL will stop working immediately.\');"><button type="submit" class="btn btn-sm btn-outline-primary">Regenerate token</button></form>';
-    const roleSelect = '<form method="POST" action="/admin/users/' + escapeHtml(u.id) + '/set-role" class="d-inline" onsubmit="return confirm(\'Change role for ' + escapeHtml(u.username) + '?\');">'
-      + '<div class="input-group input-group-sm d-inline-flex" style="width:auto;">'
-      +   '<select name="role" class="form-select form-select-sm">'
-      +     '<option value="user"'  + (u.role === 'user'  ? ' selected' : '') + '>user</option>'
-      +     '<option value="admin"' + (u.role === 'admin' ? ' selected' : '') + '>admin</option>'
-      +   '</select>'
-      +   '<button type="submit" class="btn btn-outline-primary btn-sm">Set</button>'
-      + '</div></form>';
-
-    const setPwForm = '<details class="d-inline-block ms-1">'
-      + '<summary class="btn btn-sm btn-outline-primary" style="list-style:none;cursor:pointer;">Set password</summary>'
-      + '<form method="POST" action="/admin/users/' + escapeHtml(u.id) + '/set-password" class="mt-2 p-2 border rounded">'
-      +   '<div class="input-group input-group-sm">'
-      +     '<input type="password" name="newPassword" required minlength="8" placeholder="new password" class="form-control">'
-      +     '<button type="submit" class="btn btn-primary">Save</button>'
-      +   '</div>'
-      + '</form></details>';
-
-    return ''
-      + '<tr>'
-      +   '<td><code>' + escapeHtml(u.username) + '</code>' + (isMe ? ' <span class="text-secondary small">(you)</span>' : '') + '</td>'
-      +   '<td><span class="badge ' + roleBadgeClass + '">' + escapeHtml(u.role) + '</span></td>'
-      +   '<td class="text-secondary small">' + escapeHtml(created) + '</td>'
-      +   '<td class="text-secondary small">' + escapeHtml(seen) + '</td>'
-      +   '<td class="text-nowrap"><div class="d-flex flex-wrap gap-1 align-items-center">' + roleSelect + setPwForm + regenBtn + deleteBtn + '</div></td>'
+      +   '<td><code>' + escapeHtml(item.id) + '</code><div class="text-secondary small mt-1">Created ' + escapeHtml(created) + '<br>Updated ' + escapeHtml(updated) + '</div></td>'
+      +   '<td>' + status + '</td>'
+      +   '<td><strong>' + (item.readable ? item.indexerCount : '—') + '</strong> <span class="text-secondary">indexer' + (item.indexerCount === 1 ? '' : 's') + '</span></td>'
+      +   '<td>' + escapeHtml(catalogs) + '<div class="text-secondary small mt-1">' + escapeHtml(limits) + '</div></td>'
+      +   '<td class="text-nowrap"><div class="d-flex flex-wrap gap-1">'
+      +     '<form method="POST" action="/admin/configs/' + escapeHtml(item.id) + '/' + toggleAction + '" onsubmit="return confirm(\'' + toggleLabel + ' this configuration?\');"><button type="submit" class="btn btn-sm btn-outline-primary">' + toggleLabel + '</button></form>'
+      +     '<form method="POST" action="/admin/configs/' + escapeHtml(item.id) + '/delete" onsubmit="return confirm(\'Permanently delete this configuration? Its manifest and private editing link will stop working immediately.\');"><button type="submit" class="btn btn-sm btn-outline-danger">Delete</button></form>'
+      +   '</div></td>'
       + '</tr>';
   }).join('');
 
@@ -1789,12 +1771,26 @@ function renderAdminPage(currentUser, opts) {
     + '<div class="page-header">'
     +   '<div class="row align-items-center">'
     +     '<div class="col">'
-    +       '<h2 class="page-title">Maintenance</h2>'
-    +       '<div class="text-secondary mt-1">NZB-Sport-Pro admin maintenance. Logged in as <code>' + escapeHtml(currentUser.username) + '</code>.</div>'
+    +       '<h2 class="page-title">Administration</h2>'
+    +       '<div class="text-secondary mt-1">Manage public configurations and instance maintenance. Logged in as <code>' + escapeHtml(currentUser.username) + '</code>.</div>'
     +     '</div>'
+    +     '<div class="col-auto"><a class="btn btn-primary" href="/configure" target="_blank" rel="noopener">Open configurator</a></div>'
     +   '</div>'
     + '</div>'
     + flashHtml
+
+    + '<div class="card mb-3" id="configurations">'
+    +   '<div class="card-header"><h3 class="card-title">User configurations (' + configs.length + ')</h3></div>'
+    +   '<div class="card-body border-bottom">'
+    +     '<p class="text-secondary small mb-0">These are the private installs created through the public configurator. Only operational summaries are shown; API keys, indexer URLs, and private editing links remain hidden.</p>'
+    +   '</div>'
+    +   '<div class="table-responsive">'
+    +     '<table class="table table-vcenter card-table">'
+    +       '<thead><tr><th>Configuration ID</th><th>Status</th><th>Services</th><th>Catalogs and limits</th><th class="w-1">Actions</th></tr></thead>'
+    +       '<tbody>' + (rows || '<tr><td colspan="5" class="text-secondary text-center py-4">No public configurations have been created yet.</td></tr>') + '</tbody>'
+    +     '</table>'
+    +   '</div>'
+    + '</div>'
 
     // Catalogs / refresh
     + '<div class="card mb-3">'
@@ -1806,51 +1802,7 @@ function renderAdminPage(currentUser, opts) {
     +     '</form>'
     +   '</div>'
     + '</div>'
-
-    // Users
-    + '<div class="card mb-3">'
-    +   '<div class="card-header"><h3 class="card-title">Stored users (' + all.length + ')</h3></div>'
-    +   '<div class="table-responsive">'
-    +     '<table class="table table-vcenter card-table">'
-    +       '<thead><tr><th>Username</th><th>Role</th><th>Created</th><th>Last seen</th><th class="w-1"></th></tr></thead>'
-    +       '<tbody>' + rows + '</tbody>'
-    +     '</table>'
-    +   '</div>'
-    + '</div>'
-
-    // Create new user
-    + '<div class="card mb-3">'
-    +   '<div class="card-header"><h3 class="card-title">Create a stored user</h3></div>'
-    +   '<div class="card-body">'
-    +     '<p class="text-secondary small mb-3">Optional additional user account stored in the data volume. The environment-managed administrator is configured with ADMIN_USER and ADMIN_PASSWORD.</p>'
-    +     '<form method="POST" action="/admin/users/create" class="row g-2 align-items-end">'
-    +       '<div class="col-md-4">'
-    +         '<label class="form-label">Username</label>'
-    +         '<input class="form-control" name="username" required minlength="3" maxlength="32" pattern="[A-Za-z0-9_.\\-]{3,32}" placeholder="3-32 chars">'
-    +       '</div>'
-    +       '<div class="col-md-3">'
-    +         '<label class="form-label">Password</label>'
-    +         '<input class="form-control" name="password" type="password" required minlength="8" placeholder="min 8 chars">'
-    +       '</div>'
-    +       '<div class="col-md-2">'
-    +         '<label class="form-label">Role</label>'
-    +         '<select class="form-select" name="role"><option value="user" selected>user</option><option value="admin">admin</option></select>'
-    +       '</div>'
-    +       '<div class="col-md-3">'
-    +         '<button class="btn btn-primary w-100" type="submit">Create user</button>'
-    +       '</div>'
-    +     '</form>'
-    +   '</div>'
-    + '</div>'
-
-    + invitesHtml
-
-    // Shared inline JS: password show/toggle + copy button.
-    // (Sidebar nav links replaced the bottom footer strip — chrome handles nav.)
-    + '<script>'
-    + 'document.addEventListener("click",function(e){var b=e.target&&e.target.closest?e.target.closest(".btn-reveal"):null;if(!b)return;e.preventDefault();var g=b.closest(".input-group");if(!g)return;var i=g.querySelector("input");if(!i)return;var sh=i.type==="password";i.type=sh?"text":"password";b.textContent=sh?"Hide":"Show";});'
-    + 'document.addEventListener("click",function(e){var c=e.target&&e.target.closest?e.target.closest(".btn-copy"):null;if(!c)return;var u=c.getAttribute("data-copy");if(!u)return;if(navigator.clipboard)navigator.clipboard.writeText(u);var t=c.textContent;c.textContent="Copied!";setTimeout(function(){c.textContent=t;},1500);});'
-    + '</script>';
+    ;
 
   return tablerChrome.tablerPage('Admin', body, { user: currentUser, currentSection: 'admin' });
 }

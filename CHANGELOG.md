@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.7
+
+### Public configuration administration
+
+- Replaced the legacy stored-account and invite interface with management for
+  the encrypted configurations actually created through `/configure`.
+- Added privacy-safe configuration summaries with status, dates, indexer and
+  catalog counts, playback limits, and pre-show filtering state. Secrets,
+  indexer URLs, and private editing links are never rendered.
+- Added admin controls to disable, re-enable, or permanently delete a public
+  configuration. Disabled manifests immediately stop resolving.
+- Retired the remaining stored-user, invite, match-test, and public invitation
+  routes. With environment auth enabled, legacy stored accounts cannot sign in.
+- Renamed the main admin navigation to **Configurations** and improved its
+  empty state, destructive confirmations, and configurator shortcut.
+
 ## 0.4.6
 
 ### Authoritative admin authentication

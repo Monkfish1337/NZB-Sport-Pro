@@ -149,10 +149,13 @@ invalidates the old install URL while retaining the private editing link.
 The admin dashboard is separate and optional. Set both `ADMIN_USER` and an
 `ADMIN_PASSWORD` of at least 12 characters to enable an environment-managed
 login at `/login`; those credentials are never written to the data volume and
-become authoritative, so old setup-created administrators cannot access the
-maintenance dashboard.
-The authenticated maintenance surface contains metadata refresh, user
-management, health, logs, and encrypted backup. Legacy scraper search, power
+become authoritative, so old stored accounts cannot access the admin dashboard.
+Public users create private installs through `/configure`; they do not receive
+dashboard accounts.
+The authenticated admin surface contains privacy-safe public-configuration
+management, metadata refresh, health, logs, and encrypted backup. Administrators
+can disable, re-enable, or permanently delete configurations without exposing
+their API keys or private editing links. Legacy scraper search, power
 tools, match editing, promotion editing, content authoring, and source-setting
 routes are disabled in NZB-Sport-Pro.
 
