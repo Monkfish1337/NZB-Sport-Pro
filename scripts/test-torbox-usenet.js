@@ -107,6 +107,43 @@ async function main() {
   assert.strictEqual(owned.get(expectedHash), 99);
   assert.strictEqual(owned.get(rawHash), 99);
   assert.strictEqual(owned.has(torboxUsenet.nzbHash(uncachedNzb)), false);
+
+  const recoveryMessageId = 'recovered-cached-match@news.example';
+  const recoveryNzb = Buffer.from('<nzb><file subject="recovered"><segments><segment number="1">'
+    + recoveryMessageId + '</segment></segments></file></nzb>');
+  const recoveryHash = require('crypto').createHash('md5').update(recoveryMessageId).digest('hex');
+  async function recoveryFetch(url) {
+    if (url.includes('/usenet/checkcached')) {
+      return response(200, { data: { [recoveryHash]: { hash: recoveryHash } } });
+    }
+    if (url.endsWith('/usenet/createusenetdownload')) throw new Error('network timeout at: create');
+    if (url.includes('/usenet/mylist?limit=1000')) {
+      return response(200, { data: [{
+        id: 66,
+        alternative_hashes: [recoveryHash],
+        download_finished: true,
+        download_present: true,
+      }] });
+    }
+    if (url.includes('/usenet/mylist?')) {
+      return response(200, { data: { id: 66, files: [
+        { id: 3, name: 'recovered-match.mkv', size: 3000000000 },
+      ] } });
+    }
+    if (url.includes('/usenet/requestdl')) {
+      return response(200, { data: 'https://cdn.torbox.app/recovered-match.mkv' });
+    }
+    throw new Error('unexpected recovery URL ' + url);
+  }
+  const recovered = await torboxUsenet.resolveNzb(
+    recoveryNzb, 'Recovered match', 'torbox-key-recovery', () => {}, {
+      fetchImpl: recoveryFetch,
+      pollIntervalMs: 0,
+      recoveryAttempts: 1,
+    }
+  );
+  assert.strictEqual(recovered.url, 'https://cdn.torbox.app/recovered-match.mkv');
+  assert.strictEqual(recovered.id, 66);
   console.log('TorBox Usenet cached/queued resolver tests passed');
 }
 

@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.46.0--experimental.3-orange.svg" alt="Version 0.46.0 experimental 3">
+  <img src="https://img.shields.io/badge/version-0.46.0--experimental.4-orange.svg" alt="Version 0.46.0 experimental 4">
   <a href="https://github.com/Monkfish1337/Serioussportsync/actions/workflows/ci.yml"><img src="https://github.com/Monkfish1337/Serioussportsync/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/Monkfish1337/Serioussportsync/pkgs/container/serioussportsync"><img src="https://img.shields.io/badge/GHCR-container-2496ED?logo=docker&logoColor=white" alt="Container image"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT license"></a>
@@ -101,7 +101,7 @@ It pulls `ghcr.io/monkfish1337/serioussportsync:experimental-newznab` and uses
 container `serioussportsync-experimental`, host port `7001`, and a separate
 `serioussportsync_experimental_data` volume. The normal stable container,
 `.env`, port `7000`, `latest` image, and data volume are not touched. A pinned
-`0.46.0-experimental.3` tag is published from the same commit.
+`0.46.0-experimental.4` tag is published from the same commit.
 
 To update an existing test service such as `serioussportsync-test`, keep its
 current ports, environment file, and data volume, change only its Compose

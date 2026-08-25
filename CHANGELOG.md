@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.46.0-experimental.3
+## 0.46.0-experimental.4
 
 ### Isolated native Newznab → TorBox Usenet development
 
@@ -14,6 +14,8 @@
   Usenet list and reused directly when the shared cache endpoint misses them.
 - Shared-cache batches prioritize one message ID plus cleaned/raw NZB and
   exact/normalized URL hashes for every displayed result before extra IDs.
+- Cached attachment timeouts are recovered through a forced-fresh TorBox user
+  list lookup, allowing the original click to continue to playback.
 - Cached clicks use TorBox cached-only creation; uncached content is not added
   to a user's account until its queue row is clicked. SSS never stores NZBs on
   disk or proxies media.
