@@ -86,6 +86,21 @@ async function main() {
     data: { [expectedHash]: { hash: expectedHash } },
   }, [expectedHash, torboxUsenet.nzbHash(uncachedNzb)]);
   assert.deepStrictEqual(Array.from(batch), [expectedHash]);
+  const owned = torboxUsenet.ownedReadyHashesFromPayload({ data: [{
+    id: 99,
+    hash: rawHash,
+    alternative_hashes: [expectedHash],
+    download_finished: true,
+    download_present: true,
+  }, {
+    id: 100,
+    hash: torboxUsenet.nzbHash(uncachedNzb),
+    download_finished: false,
+    download_present: true,
+  }] });
+  assert.strictEqual(owned.get(expectedHash), 99);
+  assert.strictEqual(owned.get(rawHash), 99);
+  assert.strictEqual(owned.has(torboxUsenet.nzbHash(uncachedNzb)), false);
   console.log('TorBox Usenet cached/queued resolver tests passed');
 }
 

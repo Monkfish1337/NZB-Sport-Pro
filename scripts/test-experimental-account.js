@@ -58,7 +58,9 @@ async function main() {
         const hasCached = body.hashes.includes(cachedHash);
         cacheCheckSawCached = cacheCheckSawCached || hasCached;
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ data: hasCached ? { [cachedHash]: { hash: cachedHash } } : {} }));
+        // Reproduce TorBox's shared-cache miss for a job already completed in
+        // this user's account. The owned-list fallback must still mark it ready.
+        res.end(JSON.stringify({ data: {} }));
       });
     }
     if (requestUrl.pathname === '/v1/api/usenet/createusenetdownload') {
@@ -74,8 +76,17 @@ async function main() {
       });
     }
     if (requestUrl.pathname === '/v1/api/usenet/mylist') {
-      const id = Number(requestUrl.searchParams.get('id'));
+      const rawId = requestUrl.searchParams.get('id');
       res.setHeader('Content-Type', 'application/json');
+      if (rawId == null) return res.end(JSON.stringify({ data: [{
+        id: 77,
+        hash: '00000000000000000000000000000000',
+        alternative_hashes: [cachedHash],
+        download_finished: true,
+        download_present: true,
+        cached: true,
+      }] }));
+      const id = Number(rawId);
       return res.end(JSON.stringify({ data: id === 77 ? { id: 77, files: [
         { id: 2, name: 'match.1080p.mkv', size: 4000000000 },
       ] } : { id: 88, files: [] } }));
@@ -191,8 +202,8 @@ async function main() {
     assert.strictEqual(played.headers.get('location'), mockOrigin + '/video.mp4');
     const queued = await fetch(nativeRows[1].url, { redirect: 'manual' });
     assert.strictEqual(queued.status, 425);
-    assert.strictEqual(torboxUploadCount, 2);
-    assert.strictEqual(cachedOnlyCreateCount, 1);
+    assert.strictEqual(torboxUploadCount, 1, 'owned ready job is reused without another upload');
+    assert.strictEqual(cachedOnlyCreateCount, 0);
     assert.strictEqual(cacheCheckSawCached, true, 'message-ID hash was included in cache classification');
     assert.strictEqual(nzbFetchCount, 2, 'prepared NZBs are reused on click without a second indexer grab');
     console.log('experimental account UI, instant/queue rows, bounded NZB reuse, and both play paths passed');
