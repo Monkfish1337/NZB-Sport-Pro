@@ -45,7 +45,7 @@ By default, a queue click can continue through the initial resolver request and
 five continuations of up to 35 seconds each, covering roughly three and a half
 minutes. The smaller redirect count leaves native players enough headroom for
 the final TorBox/CDN hand-off. If TorBox finishes within that window, playback
-starts without a second click. Operators can tune `TORBOX_USENET_PLAY_WAIT_MS` and
+starts without a second click. Administrators can tune `TORBOX_USENET_PLAY_WAIT_MS` and
 `TORBOX_USENET_WAIT_REDIRECTS`; the existing processing response remains the
 fallback for exceptionally slow jobs or clients with a restrictive redirect
 limit. NZB-Sport-Pro never proxies the video itself.
@@ -69,7 +69,7 @@ services:
       PUBLIC_URL: "https://nzb-sport-pro.example.com"
       SETUP_TOKEN: "replace-with-a-separate-random-setup-secret"
       ADMIN_USER: "operator"
-      ADMIN_PASSWORD: "replace-with-a-strong-operator-password"
+      ADMIN_PASSWORD: "replace-with-a-strong-admin-password"
       TRUST_PROXY_HEADERS: "cloudflare"
       TSDB_API_KEY: "123"
     volumes:
@@ -92,11 +92,11 @@ volumes:
 - TorBox and Newznab API keys are encrypted at rest in the persistent data
   volume. Back up `SESSION_SECRET` separately; losing it makes saved public
   configurations unreadable.
-- The operator can observe event/search titles, indexer display names, coarse
+- The administrator can observe event/search titles, indexer display names, coarse
   result counts, processing states, timestamps, and pseudonymous configuration
   IDs in application logs. API keys, passwords, authorization headers, and
   credential-bearing URLs are centrally redacted. Container/platform access
-  logs remain the operator's responsibility.
+  logs remain the administrator's responsibility.
 - The service necessarily sends each user's API credentials to the provider
   they configured (their Newznab indexer and TorBox). NZB bytes are bounded,
   held briefly in memory, forwarded to that user's TorBox account after a
@@ -108,7 +108,7 @@ do not create a public DNS record that exposes the origin by another route.
 
 ### Backup and restore
 
-The operator Health page downloads a timestamped archive of the complete
+The admin Health page downloads a timestamped archive of the complete
 `/app/data` volume, including the encrypted public configuration store. Keep a
 separate secure backup of the exact `SESSION_SECRET`; it is deliberately not
 included in the downloadable archive. Neither half can restore public users by
@@ -146,10 +146,12 @@ returning keys or response bodies to the browser. **Rotate manifest** immediatel
 invalidates the old install URL while retaining the private editing link.
 **Delete configuration** permanently invalidates both URLs.
 
-The operator dashboard is separate and optional. Set both `ADMIN_USER` and an
+The admin dashboard is separate and optional. Set both `ADMIN_USER` and an
 `ADMIN_PASSWORD` of at least 12 characters to enable an environment-managed
-login at `/login`; those credentials are never written to the data volume.
-The authenticated maintenance surface contains metadata refresh, operator-user
+login at `/login`; those credentials are never written to the data volume and
+become authoritative, so old setup-created administrators cannot access the
+maintenance dashboard.
+The authenticated maintenance surface contains metadata refresh, user
 management, health, logs, and encrypted backup. Legacy scraper search, power
 tools, match editing, promotion editing, content authoring, and source-setting
 routes are disabled in NZB-Sport-Pro.
@@ -201,7 +203,7 @@ The last imported source revision is recorded in
 - Resolve and queue actions use short-lived signed URLs.
 - Each queue click acts only on the TorBox account belonging to that manifest.
 
-Operators of a public instance should still add normal reverse-proxy rate
+Administrators of a public instance should still add normal reverse-proxy rate
 limits and abuse controls before advertising it widely.
 
 ## Development

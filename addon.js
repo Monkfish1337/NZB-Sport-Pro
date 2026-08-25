@@ -536,7 +536,12 @@ function createApp() {
     const envAdmin = environmentAdmin();
     const envMatch = envAdmin
       && username.toLowerCase() === envAdmin.username.toLowerCase();
-    const u = envMatch ? envAdmin : users.findByUsername(username);
+    const storedUser = envMatch ? null : users.findByUsername(username);
+    // Environment credentials are authoritative for dashboard access. Keep
+    // ordinary stored users usable, but never let an old stored administrator
+    // bypass configured .env credentials.
+    const storedUserAllowed = storedUser && (!envAdmin || storedUser.role !== 'admin');
+    const u = envMatch ? envAdmin : (storedUserAllowed ? storedUser : null);
     // Always run bcrypt — verifyDummy for unknown users — so response time
     // doesn't reveal whether the username exists.
     const ok = envMatch
@@ -994,7 +999,7 @@ function createApp() {
   for (const retiredPath of retiredAdminPaths) {
     app.use(retiredPath, requireAdmin, (req, res) => res.status(404).send(authPage(
       'Maintenance tool unavailable',
-      '<p>This legacy SeriousSportSync operator tool is not part of NZB-Sport-Pro.</p>'
+      '<p>This legacy SeriousSportSync admin tool is not part of NZB-Sport-Pro.</p>'
       + '<p><a href="/admin">Back to maintenance</a></p>'
     )));
   }
@@ -1785,7 +1790,7 @@ function renderAdminPage(currentUser, opts) {
     +   '<div class="row align-items-center">'
     +     '<div class="col">'
     +       '<h2 class="page-title">Maintenance</h2>'
-    +       '<div class="text-secondary mt-1">NZB-Sport-Pro operator maintenance. Logged in as <code>' + escapeHtml(currentUser.username) + '</code>.</div>'
+    +       '<div class="text-secondary mt-1">NZB-Sport-Pro admin maintenance. Logged in as <code>' + escapeHtml(currentUser.username) + '</code>.</div>'
     +     '</div>'
     +   '</div>'
     + '</div>'
@@ -1804,7 +1809,7 @@ function renderAdminPage(currentUser, opts) {
 
     // Users
     + '<div class="card mb-3">'
-    +   '<div class="card-header"><h3 class="card-title">Stored operator users (' + all.length + ')</h3></div>'
+    +   '<div class="card-header"><h3 class="card-title">Stored users (' + all.length + ')</h3></div>'
     +   '<div class="table-responsive">'
     +     '<table class="table table-vcenter card-table">'
     +       '<thead><tr><th>Username</th><th>Role</th><th>Created</th><th>Last seen</th><th class="w-1"></th></tr></thead>'
@@ -1815,9 +1820,9 @@ function renderAdminPage(currentUser, opts) {
 
     // Create new user
     + '<div class="card mb-3">'
-    +   '<div class="card-header"><h3 class="card-title">Create a stored operator user</h3></div>'
+    +   '<div class="card-header"><h3 class="card-title">Create a stored user</h3></div>'
     +   '<div class="card-body">'
-    +     '<p class="text-secondary small mb-3">Optional additional operator account stored in the data volume. The primary environment-managed administrator is configured with ADMIN_USER and ADMIN_PASSWORD.</p>'
+    +     '<p class="text-secondary small mb-3">Optional additional user account stored in the data volume. The environment-managed administrator is configured with ADMIN_USER and ADMIN_PASSWORD.</p>'
     +     '<form method="POST" action="/admin/users/create" class="row g-2 align-items-end">'
     +       '<div class="col-md-4">'
     +         '<label class="form-label">Username</label>'

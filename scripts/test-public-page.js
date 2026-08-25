@@ -50,6 +50,7 @@ const nativeNewznab = require('../lib/sources/native-newznab');
     const configureHtml = await configure.text();
     assert.strictEqual(configure.status, 200);
     assert.match(configureHtml, /Configure NZB-Sport-Pro/);
+    assert.match(configureHtml, /href="\/login">Admin login<\/a>/);
     assert.match(configureHtml, /TorBox API key/);
     assert.match(configureHtml, /Newznab indexers/);
     assert.match(configureHtml, />Install Stremio</);

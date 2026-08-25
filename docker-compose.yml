@@ -13,7 +13,7 @@ services:
       TSDB_API_KEY: "${TSDB_API_KEY:-123}"
       TSDB_SEASONS: "${TSDB_SEASONS:-auto}"
       REFRESH_INTERVAL_HOURS: "${REFRESH_INTERVAL_HOURS:-6}"
-      # Encrypts saved public configurations and protects operator login.
+      # Encrypts saved public configurations and protects admin login.
       SESSION_SECRET: "${SESSION_SECRET}"
       PUBLIC_URL: "${PUBLIC_URL}"
       SETUP_TOKEN: "${SETUP_TOKEN:-}"

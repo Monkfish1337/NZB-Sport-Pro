@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.6
+
+### Authoritative admin authentication
+
+- Made `ADMIN_USER` and `ADMIN_PASSWORD` authoritative for maintenance access;
+  old setup-created administrator accounts can no longer bypass environment
+  authentication when both variables are configured.
+- Added an unambiguous startup log confirming that environment administrator
+  authentication is active, without logging the password.
+- Added an **Admin login** button to the top-right of the public configurator.
+
 ## 0.4.5
 
 ### Public configuration resilience

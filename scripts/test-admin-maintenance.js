@@ -14,8 +14,12 @@ process.env.ADMIN_USER = 'operator';
 process.env.ADMIN_PASSWORD = 'environment-admin-password';
 
 const { createApp } = require('../addon');
+const users = require('../lib/users');
 
 (async () => {
+  await users.createUser({
+    username: 'old-test-admin', password: 'old-test-admin-password', role: 'admin',
+  });
   const server = createApp().listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
   const base = 'http://127.0.0.1:' + server.address().port;
@@ -26,6 +30,14 @@ const { createApp } = require('../addon');
       body: new URLSearchParams({ username: 'operator', password: 'wrong-password' }),
     });
     assert.strictEqual(denied.status, 401);
+
+    const storedAdmin = await fetch(base + '/login', {
+      method: 'POST', redirect: 'manual',
+      body: new URLSearchParams({
+        username: 'old-test-admin', password: 'old-test-admin-password',
+      }),
+    });
+    assert.strictEqual(storedAdmin.status, 401);
 
     const login = await fetch(base + '/login', {
       method: 'POST', redirect: 'manual',
@@ -49,7 +61,7 @@ const { createApp } = require('../addon');
     assert.strictEqual(admin.status, 200);
     assert.match(html, /Maintenance/);
     assert.match(html, /Metadata refresh/);
-    assert.match(html, /Stored operator users/);
+    assert.match(html, /Stored users/);
     assert.match(html, />Health</);
     assert.match(html, />Logs</);
     assert.doesNotMatch(html, /Power Tool|Match Editor|Content Studio|Torrent discovery|Direct Prowlarr|General search/);
