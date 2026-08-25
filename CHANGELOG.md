@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.4
+
+### Result controls and editing-link guidance
+
+- Added an optional advanced filter for prelims, preliminary cards, pre-shows,
+  countdowns, kickoff shows, and Zero Hour releases. Filtering happens before
+  NZB preparation and TorBox cache checks.
+- Made the private editing link a prominent orange warning panel explaining
+  that it is the only way to reopen the configuration after the page closes.
+- Added editing-link reminders to save, copy, collection, and install feedback.
+
 ## 0.4.3
 
 ### Configurator interaction hotfix

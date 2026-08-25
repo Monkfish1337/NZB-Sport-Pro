@@ -27,6 +27,16 @@ const nativeNewznab = require('../lib/sources/native-newznab');
   ], 8, (line) => sizeLogs.push(line));
   assert.deepStrictEqual(sizeFiltered.map((item) => item.title), ['small', 'unknown']);
   assert.match(sizeLogs[0], /removed 1 result/);
+  const segmentLogs = [];
+  const segmentFiltered = streams._test.filterExcludedPreShows([
+    { title: 'UFC 330 Main Card 1080p' },
+    { title: 'UFC 330 Early Prelims 1080p' },
+    { title: 'AEW Zero Hour 1080p' },
+    { title: 'WWE WrestleMania Countdown 1080p' },
+    { title: 'WWE SummerSlam Kickoff Show 1080p' },
+  ], true, (line) => segmentLogs.push(line));
+  assert.deepStrictEqual(segmentFiltered.map((item) => item.title), ['UFC 330 Main Card 1080p']);
+  assert.match(segmentLogs[0], /removed 4/);
 
   const server = createApp().listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
@@ -50,7 +60,10 @@ const nativeNewznab = require('../lib/sources/native-newznab');
     assert.match(configureHtml, /id="rotate-manifest"/);
     assert.match(configureHtml, /id="delete-config"/);
     assert.match(configureHtml, /id="test-services"/);
-    assert.match(configureHtml, /Changes saved\. Your manifest is up to date\./);
+    assert.match(configureHtml, /Save your private editing link below before closing this page\./);
+    assert.match(configureHtml, /id="exclude-pre-shows"/);
+    assert.match(configureHtml, /Save your private editing link/);
+    assert.match(configureHtml, /the installed manifest cannot recover it/i);
     assert.doesNotMatch(configureHtml, /Direct indexer-link attachment/);
     assert.doesNotMatch(configureHtml, /Create your install|Create account|Username/);
     const inlineScripts = Array.from(configureHtml.matchAll(/<script>([\s\S]*?)<\/script>/g));
@@ -96,6 +109,7 @@ const nativeNewznab = require('../lib/sources/native-newznab');
         showCatalogsOnHome: true,
         maxStreams: 8,
         maxResultSizeGb: 8.5,
+        excludePreShows: true,
       }),
     });
     const links = await generated.json();
@@ -150,6 +164,7 @@ const nativeNewznab = require('../lib/sources/native-newznab');
     assert.strictEqual(editPayload.config.torboxApiKey, 'torbox-secret-value');
     assert.strictEqual(editPayload.config.newznabIndexers[0].apiKey, 'newznab-secret-value');
     assert.strictEqual(editPayload.config.maxResultSizeGb, 8.5);
+    assert.strictEqual(editPayload.config.excludePreShows, true);
 
     const updated = await fetch(base + '/configure/token', {
       method: 'POST',

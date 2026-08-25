@@ -28,6 +28,8 @@ generated private manifest. There is no public signup or user dashboard.
 - Keeps NZB URLs and bytes in bounded server memory and out of client responses.
 - Offers an optional per-user maximum result size, filtering oversized releases
   before NZB preparation and TorBox cache checks to favour quicker queue playback.
+- Offers an optional prelim/pre-show filter covering preliminary cards,
+  countdowns, kickoff shows, and Zero Hour releases before preparation begins.
 - Tests TorBox and Newznab settings before installation with one read-only
   request per service; the indexer check consumes one API search hit.
 - Lets users rotate a manifest if its use-only URL is exposed, or permanently
@@ -115,6 +117,10 @@ login account is created. Keep the manifest private because possession grants
 use of its services, and protect the editing link because it can display and
 change the saved credentials. Its `#edit=` fragment is not sent in HTTP request
 paths or normal reverse-proxy access logs.
+
+The private editing link cannot be recovered from an installed manifest. Users
+must copy and store it before closing the initial configuration page if they
+want to change services, catalogs, filters, or manifest settings later.
 
 The configurator's **Test services** action does not save the form. It makes a
 read-only TorBox library request and a one-result Newznab search against each
