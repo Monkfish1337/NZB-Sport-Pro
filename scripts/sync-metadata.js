@@ -8,17 +8,25 @@ const childProcess = require('child_process');
 const productRoot = path.resolve(process.argv[3] || path.join(__dirname, '..'));
 const sourceRoot = path.resolve(process.argv[2] || process.env.SSS_METADATA_SOURCE || '../Serioussportsync');
 const manifest = JSON.parse(fs.readFileSync(path.join(productRoot, 'metadata-sync.json'), 'utf8'));
+const statePath = path.join(productRoot, '.metadata-source.json');
+let previousState = null;
+try { previousState = JSON.parse(fs.readFileSync(statePath, 'utf8')); } catch {}
 
 if (!fs.existsSync(sourceRoot)) {
   throw new Error('SeriousSportSync source checkout not found: ' + sourceRoot);
 }
 
+const changedPaths = [];
 for (const relative of manifest.paths) {
   const source = path.join(sourceRoot, relative);
   const destination = path.join(productRoot, relative);
   if (!fs.existsSync(source)) throw new Error('Canonical metadata path is missing: ' + relative);
+  const sourceBytes = fs.readFileSync(source);
+  const destinationBytes = fs.existsSync(destination) ? fs.readFileSync(destination) : null;
+  if (destinationBytes && sourceBytes.equals(destinationBytes)) continue;
   fs.mkdirSync(path.dirname(destination), { recursive: true });
-  fs.copyFileSync(source, destination);
+  fs.writeFileSync(destination, sourceBytes);
+  changedPaths.push(relative);
 }
 
 let commit = 'unknown';
@@ -35,8 +43,16 @@ const state = {
   sourceRepository: manifest.sourceRepository,
   sourceBranch: manifest.sourceBranch,
   sourceCommit: commit,
-  syncedAt: new Date().toISOString(),
+  syncedAt: previousState
+    && previousState.sourceCommit === commit
+    && changedPaths.length === 0
+    ? previousState.syncedAt
+    : new Date().toISOString(),
   pathCount: manifest.paths.length,
 };
-fs.writeFileSync(path.join(productRoot, '.metadata-source.json'), JSON.stringify(state, null, 2) + '\n');
-console.log('Synced ' + manifest.paths.length + ' metadata paths from ' + commit);
+const nextState = JSON.stringify(state, null, 2) + '\n';
+const stateUnchanged = previousState
+  && JSON.stringify(previousState) === JSON.stringify(state);
+if (!stateUnchanged) fs.writeFileSync(statePath, nextState);
+console.log('Checked ' + manifest.paths.length + ' metadata paths from ' + commit
+  + '; changed ' + changedPaths.length + '.');
