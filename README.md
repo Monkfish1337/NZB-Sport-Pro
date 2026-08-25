@@ -4,9 +4,9 @@ NZB-Sport-Pro is a public-ready Stremio and Nuvio sports addon. It combines
 SeriousSportSync's event metadata with private, per-user Newznab discovery and
 TorBox Usenet playback.
 
-The public homepage follows the familiar hosted-addon flow: create a private
-configuration, add a TorBox API key and up to five Newznab indexers, choose
-catalogs, then install the generated manifest.
+The public homepage follows the Comet-style hosted-addon flow: add a TorBox API
+key and up to five Newznab indexers, choose catalogs, then install or copy the
+generated private manifest. There is no public signup or user dashboard.
 
 ## What it does
 
@@ -15,7 +15,8 @@ catalogs, then install the generated manifest.
 - Reuses completed downloads already present in that user's TorBox library.
 - Shows explicit Queue rows for everything else; nothing is added merely by
   browsing an event.
-- Encrypts TorBox and Newznab API keys at rest.
+- Authenticated-encrypts TorBox and Newznab API keys inside the private manifest
+  configuration URL; no public user record is created.
 - Keeps NZB URLs and bytes in bounded server memory and out of client responses.
 - Never downloads or proxies video data.
 
@@ -34,8 +35,6 @@ services:
     restart: unless-stopped
     environment:
       SESSION_SECRET: "replace-with-at-least-32-random-characters"
-      ADMIN_USER: "admin"
-      PUBLIC_REGISTRATION: "on"
       PUBLIC_URL: "https://nzb-sport-pro.example.com"
       TSDB_API_KEY: "123"
     volumes:
@@ -53,12 +52,13 @@ Start it with:
 docker compose up -d
 ~~~
 
-Visit the root page. The first visit redirects to `/setup` so the operator can
-create the administrator. Once setup is complete, `/` becomes the public
-landing page and `/configure` creates isolated user configurations.
+Visit the root page to open the stateless configurator. Users enter their own
+services and receive a private manifest URL; credentials are not saved as an
+account. Keep that URL private because possession grants use of its services.
 
-Set `PUBLIC_REGISTRATION=off` to retain the public landing page but restrict
-new configurations to administrator-created users and invites.
+The operator dashboard is separate and optional. Visit `/setup` explicitly to
+create its first administrator, then use `/login`, `/account`, and `/admin` for
+the retained maintenance tools.
 
 ## Metadata shared with SeriousSportSync
 
@@ -79,7 +79,7 @@ node scripts/sync-metadata.js /path/to/Serioussportsync .
 
 Product-specific code stays independent, including:
 
-- the public landing and configuration experience;
+- the public stateless configuration experience;
 - user storage and credential handling;
 - native Newznab discovery;
 - TorBox Usenet cache/library checks and resolution;
@@ -91,6 +91,9 @@ The last imported source revision is recorded in
 ## Security model
 
 - A production `SESSION_SECRET` of at least 32 random characters is mandatory.
+- Changing `SESSION_SECRET` invalidates every previously generated manifest.
+- Public users have no account or database record; their authenticated-encrypted
+  configuration lives in the private manifest URL.
 - Public configurations accept HTTPS indexer endpoints only and reject private
   or local targets by default.
 - Credential-bearing Newznab URLs are never emitted to Stremio or Nuvio.

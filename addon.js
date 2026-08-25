@@ -31,6 +31,7 @@ const { buildNuvioCollections } = require('./lib/nuvio-collections');
 const torboxVoyager = require('./lib/sources/torbox-voyager');
 const nativeNewznab = require('./lib/sources/native-newznab');
 const publicPage = require('./lib/public-page');
+const publicConfig = require('./lib/public-config');
 const APP_VERSION = require('./package.json').version || '?';
 
 
@@ -126,6 +127,7 @@ function createApp() {
   // Content Studio imports are still plain text forms, but calendar files can
   // reasonably exceed the old settings-only 16 KB ceiling.
   app.use(express.urlencoded({ extended: false, limit: '1mb' }));
+  app.use(express.json({ limit: '64kb' }));
 
   // Attach req.user from session cookie if present.
   function loadSession(req, res, next) {
@@ -160,7 +162,7 @@ function createApp() {
   // CORS — needed for the Stremio install URL.
   app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();
@@ -247,27 +249,50 @@ function createApp() {
   });
 
   app.get('/configure', (req, res) => {
-    if (req.user) return res.redirect('/account');
-    if (users.userCount() === 0) return res.redirect('/setup');
-    if (!config.publicRegistration) return res.redirect('/login');
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
-    return res.send(publicPage.registrationPage());
+    return res.send(publicPage.configurationPage({ promotions: promotions.enabled }));
   });
 
-  app.post('/configure', async (req, res) => {
-    if (req.user) return res.redirect('/account');
-    if (users.userCount() === 0) return res.redirect('/setup');
-    if (!config.publicRegistration) return res.status(403).send('Public registration is disabled.');
-    const username = String((req.body && req.body.username) || '').trim();
-    const password = String((req.body && req.body.password) || '');
+  app.get('/c/:configToken/configure', (req, res) => {
     try {
-      const user = await users.createUser({ username, password, role: 'user' });
-      sessions.setCookie(res, user.id, req);
-      return res.redirect('/account?flash=' + encodeURIComponent('Configuration created. Add TorBox and Newznab below.'));
+      const decoded = publicConfig.decode(req.params.configToken);
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
+      return res.send(publicPage.configurationPage({
+        config: decoded,
+        promotions: promotions.enabled,
+        token: req.params.configToken,
+      }));
     } catch (err) {
-      res.status(400).setHeader('Content-Type', 'text/html; charset=utf-8');
-      return res.send(publicPage.registrationPage({ error: err.message, username }));
+      return res.status(400).send('Invalid or expired private configuration link.');
+    }
+  });
+
+  app.post('/configure/token', (req, res) => {
+    try {
+      const body = req.body || {};
+      const allCatalogIds = promotions.enabled.flatMap((promotion) =>
+        promotion.catalogs.map((catalog) => catalog.id));
+      const allowedCatalogs = new Set(allCatalogIds);
+      const selected = Array.isArray(body.catalogs)
+        ? Array.from(new Set(body.catalogs.map(String).filter((id) => allowedCatalogs.has(id))))
+        : [];
+      if (selected.length === 0) throw new Error('Select at least one catalog.');
+      const token = publicConfig.encode(Object.assign({}, body, {
+        catalogs: selected.length === allCatalogIds.length ? [] : selected,
+      }));
+      const origin = publicOriginFromReq(req).replace(/\/+$/, '');
+      const basePath = '/c/' + encodeURIComponent(token);
+      const manifestUrl = origin + basePath + '/manifest.json';
+      return send(res, {
+        manifestUrl,
+        installUrl: manifestUrl.replace(/^https?:\/\//i, 'stremio://'),
+        configureUrl: basePath + '/configure',
+        collectionUrl: origin + basePath + '/nuvio-collections.json',
+      }, { cacheControl: 'no-store' });
+    } catch (err) {
+      return res.status(400).json({ ok: false, error: err.message || 'Invalid configuration.' });
     }
   });
 
@@ -594,6 +619,120 @@ function createApp() {
         log('createTorrent error: ' + err.message);
         return res.redirect(302, '/assets/warm-failed.mp4');
       }
+    });
+
+    return r;
+  }
+
+  // Stateless public addon API. The encrypted configuration token is the
+  // private manifest: it is authenticated and decrypted per request, without
+  // creating an account or writing user credentials to the database.
+  function buildConfiguredAddonRouter() {
+    const r = express.Router({ mergeParams: true });
+    const urlSign = require('./lib/url-sign');
+
+    r.use((req, res, next) => {
+      try {
+        req.userAccount = publicConfig.configuredUser(req.params.configToken);
+        req.configBasePath = '/c/' + encodeURIComponent(req.params.configToken);
+        next();
+      } catch (_) {
+        res.status(404).send('Not found');
+      }
+    });
+
+    r.get('/manifest.json', (req, res) => {
+      send(res, buildManifest({
+        user: req.userAccount,
+        origin: publicOriginFromReq(req),
+        configurable: true,
+      }));
+    });
+
+    r.get('/catalog/:type/:id.json', (req, res) => {
+      send(res, handleCatalog({ type: req.params.type, id: req.params.id, extra: {} }));
+    });
+    r.get('/catalog/:type/:id/:extra.json', (req, res) => {
+      send(res, handleCatalog({
+        type: req.params.type,
+        id: req.params.id,
+        extra: parseExtra(req.params.extra),
+      }));
+    });
+    r.get('/meta/:type/:id.json', (req, res) => {
+      send(res, handleMeta({ type: req.params.type, id: decodeURIComponent(req.params.id) }));
+    });
+    r.get('/stream/:type/:id.json', async (req, res) => {
+      try {
+        const result = await handleStream({
+          type: req.params.type,
+          id: decodeURIComponent(req.params.id),
+          debug: req.query.debug === '1',
+          userConfig: req.userAccount.config,
+          username: req.userAccount.username,
+          userId: req.userAccount.id,
+          apiToken: '',
+          basePath: req.configBasePath,
+          origin: publicOriginFromReq(req),
+        });
+        send(res, result, { cacheControl: req.query.debug ? 'no-store' : 'public, max-age=300' });
+      } catch (err) {
+        console.error('[stream] configured-route handler error:', err);
+        send(res, { streams: [] });
+      }
+    });
+
+    r.get('/resolve/:provider/:eventId/:infoHash', async (req, res) => {
+      const { provider, eventId, infoHash } = req.params;
+      const verified = urlSign.verifyResolve({
+        userId: req.userAccount.id,
+        provider,
+        eventId,
+        infoHash,
+        exp: req.query.exp,
+        sig: req.query.sig,
+      });
+      if (!verified.ok) {
+        return res.status(403).set('Cache-Control', 'no-store')
+          .send('Resolve link ' + verified.reason + '. Close and re-open the event in your client.');
+      }
+      try {
+        const out = await resolvePlay({
+          providerCode: provider,
+          eventId,
+          infoHash,
+          creds: req.userAccount.config,
+          username: req.userAccount.username,
+          userId: req.userAccount.id,
+        });
+        if (out && out.url) {
+          res.setHeader('Cache-Control', 'no-store');
+          return res.redirect(302, out.url);
+        }
+        if (out && out.queued) {
+          return res.status(425).set('Cache-Control', 'no-store')
+            .send('Added to your TorBox Usenet queue. Re-open this event when the download is ready.');
+        }
+        if (out && out.error === 'candidate-expired') {
+          return res.status(410).set('Cache-Control', 'no-store')
+            .send('This stream link expired. Close and re-open the event to search again.');
+        }
+        return res.status(404).send('Not cached on ' + provider + ' (or no longer available).');
+      } catch (err) {
+        console.error('[resolve] configured-route handler error:', err);
+        return res.status(502).send('Resolve failed.');
+      }
+    });
+
+    r.get('/nuvio-collections.json', (req, res) => {
+      const payload = buildNuvioCollections({
+        user: req.userAccount,
+        origin: publicOriginFromReq(req),
+      });
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="nzb-sport-pro-nuvio-collections.json"');
+      res.setHeader('Cache-Control', 'no-store');
+      res.send(JSON.stringify(payload, null, 2));
     });
 
     return r;
@@ -1279,16 +1418,11 @@ function createApp() {
     }
   });
 
+  app.use('/c/:configToken', buildConfiguredAddonRouter());
   app.use('/u/:userId/:apiToken', buildUserAddonRouter());
 
-  // Public product landing page. The operator still completes /setup first;
-  // after that, visitors can create isolated configurations when public
-  // registration is enabled.
   app.get('/', (req, res) => {
-    if (req.user) return res.redirect('/account');
-    if (users.userCount() === 0) return res.redirect('/setup');
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    return res.send(publicPage.landingPage({ registrationOpen: config.publicRegistration }));
+    return res.redirect('/configure');
   });
 
   return app;

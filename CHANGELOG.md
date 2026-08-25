@@ -1,13 +1,26 @@
 # Changelog
 
+## 0.2.0
+
+### Stateless hosted-addon configurator
+
+- Replaced public signup and account creation with a Comet-style configuration
+  page that directly generates private Stremio and Nuvio URLs.
+- Added authenticated AES-256-GCM configuration tokens, so public users are not
+  written to the user database and secrets never appear as plaintext in URLs.
+- Added token-scoped manifest, catalog, metadata, stream, resolve, edit and
+  Nuvio collection routes while retaining the operator tools separately.
+- Made the root URL open the configurator and documented that changing the
+  server session secret invalidates previously generated manifests.
+
 ## 0.1.0
 
 ### Standalone public product split
 
 - Split the native Newznab to TorBox Usenet work into NZB-Sport-Pro with its
   own addon identity, repository, container and release lifecycle.
-- Added a Comet-style public landing, registration and private configuration
-  flow while retaining an operator-only initial setup.
+- Added the initial public product shell and private configuration work while
+  retaining an operator-only setup surface.
 - Focused the user interface on TorBox and personal Newznab indexers; the
   SeriousSportSync stable release remains unchanged.
 - Added a declared metadata boundary and six-hour workflow that imports and

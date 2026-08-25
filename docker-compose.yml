@@ -13,10 +13,9 @@ services:
       TSDB_API_KEY: "${TSDB_API_KEY:-123}"
       TSDB_SEASONS: "${TSDB_SEASONS:-auto}"
       REFRESH_INTERVAL_HOURS: "${REFRESH_INTERVAL_HOURS:-6}"
-      # Accounts
+      # Encrypts stateless private manifest configurations and operator login.
       SESSION_SECRET: "${SESSION_SECRET}"
       ADMIN_USER: "${ADMIN_USER:-}"
-      PUBLIC_REGISTRATION: "${PUBLIC_REGISTRATION:-on}"
     volumes:
       - nzb_sport_pro_data:/app/data
     ports:

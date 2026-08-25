@@ -6,10 +6,6 @@ function num(v, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function enabled(v) {
-  return /^(1|true|yes|on)$/i.test(String(v || ''));
-}
-
 // Native per-user Newznab -> TorBox Usenet is the product's primary pipeline.
 // Keep the legacy property name while shared stream modules are gradually
 // extracted from SeriousSportSync.
@@ -38,10 +34,6 @@ module.exports = {
   addonName: 'NZB-Sport-Pro',
   addonDescription: 'Sports event metadata with private per-user Newznab discovery and TorBox Usenet playback.',
   experimentalNativeNewznab,
-  publicRegistration: process.env.PUBLIC_REGISTRATION === undefined
-    ? true
-    : enabled(process.env.PUBLIC_REGISTRATION),
-
   idPrefix: 'ufc',
 
   logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/92/UFC_Logo.svg/1280px-UFC_Logo.svg.png',
