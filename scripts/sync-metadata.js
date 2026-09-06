@@ -17,11 +17,30 @@ if (!fs.existsSync(sourceRoot)) {
   throw new Error('SeriousSportSync source checkout not found: ' + sourceRoot);
 }
 
+// A path retired upstream must stop the sync — silently skipping it would let
+// this repo drift from SSS without anyone noticing. But check them all first
+// and report them together: aborting on the first one turns a single stale
+// manifest into one failed run per dead path, and the run that reported
+// "lib/admin-content-studio.js is missing" was hiding two more behind it.
+//
+// The fix for this error is almost never to restore the file in SSS. It is to
+// decide, per path, whether the file is retired everywhere (delete it here too)
+// or still shipped by NSP alone (drop it from metadata-sync.json, which makes
+// it product-local and no longer tracked).
+const missingPaths = manifest.paths.filter(
+  (relative) => !fs.existsSync(path.join(sourceRoot, relative)));
+if (missingPaths.length) {
+  throw new Error('Canonical metadata path(s) no longer exist in '
+    + manifest.sourceRepository + '@' + manifest.sourceBranch + ':\n  '
+    + missingPaths.join('\n  ')
+    + '\nUpdate metadata-sync.json: remove each path that is now product-local, '
+    + 'or delete the file here if it was retired everywhere.');
+}
+
 const changedPaths = [];
 for (const relative of manifest.paths) {
   const source = path.join(sourceRoot, relative);
   const destination = path.join(productRoot, relative);
-  if (!fs.existsSync(source)) throw new Error('Canonical metadata path is missing: ' + relative);
   const sourceBytes = fs.readFileSync(source);
   const destinationBytes = fs.existsSync(destination) ? fs.readFileSync(destination) : null;
   if (destinationBytes && sourceBytes.equals(destinationBytes)) continue;
