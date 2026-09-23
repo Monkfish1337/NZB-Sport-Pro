@@ -106,7 +106,8 @@ const publicConfigStore = require('../lib/public-config-store');
     assert.strictEqual(syncPage.status, 200);
     assert.match(syncHtml, /Snapshot verified/);
     assert.match(syncHtml, /Serioussportsync\/commit\/[a-f0-9]{40}/);
-    assert.match(syncHtml, /31 declared/);
+    const metadataPathCount = require('../metadata-sync.json').paths.length;
+    assert.match(syncHtml, new RegExp(metadataPathCount + ' declared'));
     assert.doesNotMatch(syncHtml, /environment-admin-password|admin-test-torbox-secret|indexer-secret/);
 
     const manifestPath = '/c/' + encodeURIComponent(savedConfig.accessToken) + '/manifest.json';

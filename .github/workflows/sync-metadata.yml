@@ -13,23 +13,29 @@ concurrency:
   group: metadata-sync
   cancel-in-progress: false
 
+# SeriousSportSync's main branch now depends on application modules that are
+# intentionally outside NZB-Sport-Pro's metadata boundary. Keep automation on
+# the last compatibility-tested snapshot until that boundary is migrated.
+env:
+  SSS_COMPATIBLE_REF: c5003c5373dfc533336b58eb0e7b159da0799ceb
+
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout NZB-Sport-Pro
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: product
 
       - name: Checkout canonical SeriousSportSync metadata
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: Monkfish1337/Serioussportsync
-          ref: main
+          ref: ${{ env.SSS_COMPATIBLE_REF }}
           path: source
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '24'
 

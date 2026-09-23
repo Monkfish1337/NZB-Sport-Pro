@@ -13,8 +13,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: '24'
           cache: npm
@@ -51,7 +51,7 @@ jobs:
       SESSION_SECRET: ci-only-do-not-use-in-prod-0000000000000000000000000000000000
       ADMIN_USER: ci-admin
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: cp .env.example .env
       - run: docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet
       - run: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build --wait --wait-timeout 120
